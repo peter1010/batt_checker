@@ -1,0 +1,9 @@
+[Unit]
+Description=Check battery
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python /home/peter/git_repo/python_utils/battery/battery.py
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
