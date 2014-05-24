@@ -106,7 +106,7 @@ size_t read_sys(const char * base, const char * file, char * result, size_t maxl
         while((length > 0) && (result[length-1] == '\n'))
             length--;
 //        printf("reading..%u %u\n", length, maxlen);
-        perror("");
+//        perror("");
         close(f);
     }
     result[length] ='\0';
@@ -125,6 +125,11 @@ struct BatteryInfo_s
     float volts;
     float rate;
 };
+
+static int to_int(const char * value)
+{
+    return strtol(value, NULL, 10);
+}
 
 void check_battery(struct BatteryInfo_s * info, const char * name)
 {
@@ -147,7 +152,7 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     else if(strcmp(result, "Battery") == 0)
     {
         read_sys(name, "present", result, sizeof(result));
-        info->present = strtol(result, NULL, 10);
+        info->present = to_int(result);
     }
     else
     {
@@ -162,65 +167,79 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     get_charging_state(result, &info->charging, &info->discharging);
 
     read_sys(name, "voltage_now", result, sizeof(result));
-    info->volts = uvolts2volts(strtol(result, NULL, 10));
+    info->volts = uvolts2volts(to_int(result));
 
     int status = read_sys(name, "energy_full", result, sizeof(result));
     if(status > 0)
     {
-        info->last_full_capacity = uwatthr2joules(strtol(result, NULL, 10));
+        info->last_full_capacity = uwatthr2joules(to_int(result));
     }
     else
     {
         read_sys(name, "charge_full", result, sizeof(result));
-        info->last_full_capacity = uamphr2joules(strtol(result,NULL,10), 
+        info->last_full_capacity = uamphr2joules(to_int(result), 
                 info->volts);
     }
 
     status = read_sys(name, "energy_full_design", result, sizeof(result));
     if(status > 0)
     {
-        info->max_capacity = uwatthr2joules(strtol(result, NULL, 10));
+        info->max_capacity = uwatthr2joules(to_int(result));
     }
     else
     {
         read_sys(name, "charge_full_design", result, sizeof(result));
-        info->max_capacity = uamphr2joules(strtol(result, NULL,10), info->volts);
+        info->max_capacity = uamphr2joules(to_int(result), info->volts);
     }
 
     status = read_sys(name, "energy_now", result, sizeof(result));
     if(status >0)
     {
-        info->current_capacity = uwatthr2joules(strtol(result, NULL, 10));
+        info->current_capacity = uwatthr2joules(to_int(result));
     }
     else
     {
         read_sys(name, "charge_now", result, sizeof(result));
-        info->current_capacity = uamphr2joules(strtol(result, NULL, 10),
+        info->current_capacity = uamphr2joules(to_int(result),
                 info->volts);
     }
 
     read_sys(name, "alarm", result, sizeof(result));
     if(status > 0)
     {
-        info->min_capacity = uwatthr2joules(strtol(result,NULL,10));
+        info->min_capacity = uwatthr2joules(to_int(result));
     }
     else
     {
-        info->min_capacity = uamphr2joules(strtol(result, NULL, 10),
+        info->min_capacity = uamphr2joules(to_int(result),
                 info->volts);
     }
 
     status = read_sys(name, "power_now", result, sizeof(result));
     if(status > 0)
     {
-        info->rate = uwatts2watts(strtol(result,NULL,10));
+        info->rate = uwatts2watts(to_int(result));
     }
     else
     {
         read_sys(name, "current_now", result, sizeof(result));
-        info->rate = uwatts2watts(strtol(result,NULL,10) * info->volts);
+        info->rate = uwatts2watts(to_int(result) * info->volts);
     }
 }
+
+static int calc_left(struct BatteryInfo_s * info)
+{
+    if(info->discharging)
+    {
+        float left = info->current_capacity - info->min_capacity;
+        if(info->rate > 0.0001)
+        {
+            return (int)(left / info->rate / 60.0 + 0.5);
+        }
+    }
+    return 999;
+}
+
 
 /**
  * print info
@@ -249,23 +268,11 @@ void print_self(struct BatteryInfo_s * info)
         float left = info->current_capacity - info->min_capacity;
         float total = info->last_full_capacity - info->min_capacity;
         int percent = (int)(left*100/total + 0.5);
-        int minutes = (int)(left / info->rate / 60 + 0.5);
-        printf("left %i %i", percent, minutes);
+        printf("left %i %i", percent, calc_left(info));
     }
 }
 
 #if 0
-    def left(self):
-        if self.discharging:
-            left = self.current_capacity - self.min_capacity
-            total = self.last_full_capacity - self.min_capacity
-            percent = int(left*100/total + 0.5)
-            minutes = int(left / self.rate / 60 + 0.5)
-            print( percent, minutes)
-            return minutes
-        return 999
-
-
 
 def open_database(obj):
     """Open the database"""
@@ -296,7 +303,7 @@ def open_database(obj):
 /**
  * Check all the batteries
  */
-void check_batteries()
+static void check_batteries()
 {
     int left = 0;
     DIR * dir = opendir(SYS_PREFIX);
@@ -315,8 +322,8 @@ void check_batteries()
                     print_self(&info);
 #if 0
             open_database(obj)
-            left = obj.left()
 #endif
+                    left = calc_left(&info);
                 }
             }
         }
