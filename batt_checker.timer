@@ -3,7 +3,7 @@ Description=Check battery
 
 [Timer]
 OnBootSec=300
-OnUnitActiveSec=300
+OnUnitActiveSec=900
 
 [Install]
 WantedBy=timers.target

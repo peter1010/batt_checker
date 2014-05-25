@@ -2,8 +2,10 @@
 Description=Check battery
 
 [Service]
+User=batt_checker
+Group=batt_checker
 Type=oneshot
-ExecStart=/usr/bin/python /home/peter/git_repo/python_utils/battery/battery.py
+ExecStart=/usr/bin/batt_checker python3 -m batt_checker
 Nice=19
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
