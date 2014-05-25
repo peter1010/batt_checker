@@ -51,7 +51,7 @@ static void redirect_in()
 
 void alert(int left, const char * app_argv[])
 {
-    printf("Left =%i\n", left);
+    printf("Alert Left =%i\n", left);
 
     pid_t pid = fork();
     if(pid == 0)      /* Child */
@@ -362,9 +362,9 @@ def open_database(obj):
 /**
  * Check all the batteries
  */
-static void check_batteries()
+static int check_batteries(const char * app[])
 {
-    int left = 0;
+    int left = 9999;
     DIR * dir = opendir(SYS_PREFIX);
     if(dir)
     {
@@ -390,13 +390,58 @@ static void check_batteries()
     }
     if(left < 25)
     {
-        const char * app[] = {"test",NULL};
         alert(left, app);
     }
+    return left;
 }
 
-int main(int argv, char * argc[])
+int main(int argc, char * argv[])
 {
-    check_batteries();
+    int i, j;
+    int time_to_respawn = 15;
+    int reminder_period = 5;
+
+    for(i = 1; i < argc; i++)
+    {
+        if(argv[i][0] == '-')
+        {
+            switch(argv[i][1])
+            {
+                case 'p':
+                    i++;
+                    time_to_respawn = to_int(argv[i]);
+                    break;
+
+                case 'r':
+                    i++;
+                    reminder_period = to_int(argv[i]);
+                    break;
+            }
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    const char * app[10];
+    for(j = 0; (j < 10) && (i < argc); j++,i++)
+    {
+        app[j] = argv[i];
+    }
+    app[j] = NULL;
+
+    while(1)
+    {
+        int remaining = check_batteries(app);
+        if( (reminder_period > time_to_respawn)
+            || (remaining > time_to_respawn + reminder_period))
+        {
+            break;
+        }
+
+        sleep(60*reminder_period);
+        time_to_respawn -= reminder_period;
+    }
     return EXIT_SUCCESS;
 }   
