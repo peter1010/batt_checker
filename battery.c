@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/types.h>
 
 #define SYS_PREFIX "/sys/class/power_supply"
 
@@ -13,55 +14,104 @@ NOTIFY = "/usr/bin/notify-send"
 TIMEOUT = 20
 #endif
 
-void alert(int left)
+
+static void close_all_fds()
+{
+    const int maxFd = sysconf(_SC_OPEN_MAX);
+    int i;
+    for(i = 3; i <= maxFd; i++)
+    {
+        close(i);
+    }
+}
+
+
+static void redirect_out()
+{
+    /* Redirect stdout & stderr to /dev/null */
+    const int fd_null_out = open("/dev/null", O_RDONLY);
+    if(fd_null_out > 0)
+    {
+	dup2(fd_null_out, 1);
+	dup2(fd_null_out, 2);
+	    
+        close(fd_null_out);
+    }
+}
+
+static void redirect_in()
+{
+    const int fd_null_in = open("/dev/null", O_WRONLY);
+    if(fd_null_in > 0)
+    {
+        dup2(fd_null_in, 0);
+        close(fd_null_in);
+    }
+}
+
+void alert(int left, const char * app_argv[])
 {
     printf("Left =%i\n", left);
-#if 0
-    msg ='Time left %3i mins' % left
-    if os.path.exists(NOTIFY):
-        args = [NOTIFY, "Battery flat", msg]
-    proc = subprocess.Popen(args)
-    proc.wait()
-#endif
+
+    pid_t pid = fork();
+    if(pid == 0)      /* Child */
+    {
+        /* Group child and any grand children under the same process group */
+        if(setpgid(pid, 0) != 0)
+        {
+            fprintf(stderr, "Failed to set process group ID\n");
+        }
+
+        redirect_out();
+        redirect_in();
+        close_all_fds();
+
+        pid_t pid = fork();
+        if(pid == 0)
+        {
+            execvp(app_argv[0], (char **) app_argv);
+            exit(EXIT_FAILURE);
+        }
+        else
+        {
+            exit(0);
+        }
+    }
 }
 
 /**
  * Convert value into two bool values
  */
-void get_charging_state(const char * value, int *charging, int *discharging)
+static void get_charging_state(const char * value, bool *charging, bool *discharging)
 {
+    bool up = false;
+    bool down = false;
+
     if(strcmp(value, "Charging") == 0)
     {
-        *charging = true;
-        *discharging = false;
+        up = true;
     }
     else if(strcmp(value, "Discharging") == 0)
     {
-        *charging = false;
-        *discharging = true;
+        down = true;
     }
-    else if(strcmp(value, "Unknown") == 0)
-    {
-        *charging = false;
-        *discharging = false;
-    }
-    else if(strcmp(value, "Full") == 0)
-    {
-        *charging = false;
-        *discharging = false;
-    }
-    else
+    else if( (strcmp(value, "Unknown") != 0) 
+            && (strcmp(value, "Full") != 0))
     {
         fprintf(stderr, "State = '%s'", value);
         exit(1);
     }
+    if(charging) 
+        *charging = up;
+    if(discharging) 
+        *discharging = down;
 }
 
 
 /**
  * Convert uW to W
  */
-float uwatts2watts(int value)
+static float uwatts2watts(int value)
 {
     return value / 1000000.0;
 }
@@ -69,7 +119,7 @@ float uwatts2watts(int value)
 /**
  * Convert uWh to Joules
  */
-float uwatthr2joules(int value)
+static float uwatthr2joules(int value)
 {
     return (value * 60.0 * 60.0)/1000000.0;
 }
@@ -77,7 +127,7 @@ float uwatthr2joules(int value)
 /**
  * Convert uWh to Joules
  */
-float uamphr2joules(int value, float volts)
+static float uamphr2joules(int value, float volts)
 {
     return uwatthr2joules(value * volts);
 }
@@ -85,7 +135,7 @@ float uamphr2joules(int value, float volts)
 /**
  * Convert uV to V
  */
-float uvolts2volts(int value)
+static float uvolts2volts(int value)
 {
     return value / 1000000.0;
 }
@@ -116,8 +166,8 @@ size_t read_sys(const char * base, const char * file, char * result, size_t maxl
 struct BatteryInfo_s
 {
     int present;
-    int charging;
-    int discharging;
+    bool charging;
+    bool discharging;
     float max_capacity;
     float last_full_capacity;
     float current_capacity;
@@ -133,15 +183,7 @@ static int to_int(const char * value)
 
 void check_battery(struct BatteryInfo_s * info, const char * name)
 {
-    info->present = false;
-    info->charging = false;
-    info->discharging = false;
-    info->max_capacity = 0;
-    info->last_full_capacity = 0;
-    info->current_capacity = 0;
-    info->min_capacity = 0;
-    info->volts = 0;
-    info->rate = 0;
+    memset(info, 0, sizeof(*info));
 
     char result[512];
     read_sys(name, "type", result, sizeof(result));
@@ -227,11 +269,11 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     }
 }
 
-static int calc_left(struct BatteryInfo_s * info)
+static int calc_left(struct BatteryInfo_s * info, float min)
 {
     if(info->discharging)
     {
-        float left = info->current_capacity - info->min_capacity;
+        float left = info->current_capacity - min;
         if(info->rate > 0.0001)
         {
             return (int)(left / info->rate / 60.0 + 0.5);
@@ -240,35 +282,52 @@ static int calc_left(struct BatteryInfo_s * info)
     return 999;
 }
 
+static int calc_percent(float part, float total)
+{
+    if(total > part)
+    {
+        return (int)(part*100/total + 0.5);
+    }
+    return -1;
+}
+ 
 
 /**
  * print info
  */
 void print_self(struct BatteryInfo_s * info)
 {
-    printf("Present=%i\n", info->present);
-    printf("Charging=%i\n", info->charging);
-    printf("Discharging=%i\n", info->discharging);
-    printf("Max=%f\n", info->max_capacity);
-    printf("Last full=%f\n", info->last_full_capacity);
-    printf("Current=%f\n", info->current_capacity);
-    printf("Min=%f\n", info->min_capacity);
-    printf("volts=%.2f\n", info->volts);
-    printf("rate=%f\n", info->rate);
+    if(!info->present)
+    {
+        printf("No battery\n");
+        return;
+    }
+
+    printf("%s %s\n", info->charging ? "Charging " : "", 
+                      info->discharging ? "Discharging" : "");
+
+    printf("Max      =%10.1f J (%3i%%)\n", info->max_capacity, 100);
+    printf("Last full=%10.1f J (%3i%%)\n", info->last_full_capacity, 
+            calc_percent(info->last_full_capacity, info->max_capacity));
+    printf("Current  =%10.1f J (%3i%%)\n", info->current_capacity,
+            calc_percent(info->current_capacity, info->max_capacity));
+    printf("Min      =%10.1f J (%3i%%)\n", info->min_capacity,
+            calc_percent(info->min_capacity, info->max_capacity));
+
+    printf("volts=%.2f v\n", info->volts);
 
 //    info->min_capacity = 0
     if(info->charging)
     {
         float left = info->last_full_capacity - info->current_capacity;
         int minutes = (int)(left / info->rate / 60.0 + 0.5);
-        printf( "mins letf=%i", minutes);
+        printf("rate=%f J/s\n", info->rate);
+        printf( "mins letf=%i\n", minutes);
     }
     if(info->discharging)
     {
-        float left = info->current_capacity - info->min_capacity;
-        float total = info->last_full_capacity - info->min_capacity;
-        int percent = (int)(left*100/total + 0.5);
-        printf("left %i %i", percent, calc_left(info));
+        printf("rate=%f J/s\n", info->rate);
+        printf("left %i mins\n", calc_left(info, 0));
     }
 }
 
@@ -323,7 +382,7 @@ static void check_batteries()
 #if 0
             open_database(obj)
 #endif
-                    left = calc_left(&info);
+                    left = calc_left(&info, 0);
                 }
             }
         }
@@ -331,11 +390,13 @@ static void check_batteries()
     }
     if(left < 25)
     {
-        alert(left);
+        const char * app[] = {"test",NULL};
+        alert(left, app);
     }
 }
 
 int main(int argv, char * argc[])
 {
     check_batteries();
+    return EXIT_SUCCESS;
 }   
