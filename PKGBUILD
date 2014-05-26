@@ -7,7 +7,7 @@ arch=('any')
 url="http:"
 license=('GPL')
 makedepends=('python')
-depends=('python' 'systemd')
+depends=('python' 'systemd' 'tk')
 source=()
 install='batt_checker.install'
 
