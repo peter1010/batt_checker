@@ -1,0 +1,9 @@
+## arg 1:  the new package version
+post_install() {
+    python -m batt_checker.service start
+}
+
+## arg 1:  the old package version
+pre_remove() {
+    python -m batt_checker.service stop
+}
