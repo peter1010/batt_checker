@@ -39,7 +39,7 @@ def make_dir(path, uid, gid):
 
 def start_service():
     home = os.path.join("/var","cache", "batt_checker")
-    make_dir(home, uid, gid)
+    make_dir(home, 1, 1)
 #    make_dir(os.path.join("/etc","batt_checker"), None, None)
     subprocess.call(["systemctl","enable","batt_checker.timer"])
     subprocess.call(["systemctl","start","batt_checker.timer"])

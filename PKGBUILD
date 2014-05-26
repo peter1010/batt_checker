@@ -7,7 +7,7 @@ arch=('any')
 url="http:"
 license=('GPL')
 makedepends=('python')
-depends=('python' 'tkinter')
+depends=('python' 'systemd')
 source=()
 install='batt_checker.install'
 
@@ -22,9 +22,6 @@ check() {
 }
 
 package() {
-    pushd ../c_src
-    make
-    popd
     pushd ..
     DONT_START=1 python setup.py install --root=$pkgdir
     popd

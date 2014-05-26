@@ -2,6 +2,8 @@
 
 import os
 import pwd
+import subprocess
+
 from distutils.core import setup
 from distutils.command import install_data, install
 
@@ -9,11 +11,16 @@ from distutils.command import install_data, install
 class my_install(install.install):
     def run(self):
         retVal = super().run()
-        if not os.getenv("DONT_START"):
-            from src import service
-            service.start_service()
+        if self.root is None or not self.root.endswith("dumb"):
+            if not os.getenv("DONT_START"):
+                from py_src import service
+                service.start_service()
         return retVal;
 
+def get_batt_checker_exe():
+    subprocess.call(['make', '-C', 'c_src'])
+    print("Bing")
+    return os.path.join("c_src","__%s__" % os.uname().machine,"batt_checker")
 
 setup(name='batt_checker',
       version='1.0',
@@ -26,6 +33,7 @@ setup(name='batt_checker',
       packages=['batt_checker'],
       data_files=[\
             ('/usr/lib/systemd/system',
-                ('batt_checker.timer", "batt_checker.service'))],
+                ('batt_checker.timer', 'batt_checker.service')),
+            ('/usr/bin/',(get_batt_checker_exe(),))],
       cmdclass = {'install' : my_install}
       )
