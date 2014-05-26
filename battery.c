@@ -9,11 +9,6 @@
 
 #define SYS_PREFIX "/sys/class/power_supply"
 
-#if 0
-NOTIFY = "/usr/bin/notify-send"
-TIMEOUT = 20
-#endif
-
 
 static void close_all_fds()
 {
@@ -25,16 +20,17 @@ static void close_all_fds()
     }
 }
 
-
+/**
+ * Redirect stdout & stderr to /dev/null
+ */
 static void redirect_out()
 {
-    /* Redirect stdout & stderr to /dev/null */
     const int fd_null_out = open("/dev/null", O_RDONLY);
     if(fd_null_out > 0)
     {
 	dup2(fd_null_out, 1);
 	dup2(fd_null_out, 2);
-	    
+
         close(fd_null_out);
     }
 }
@@ -62,8 +58,8 @@ void alert(int left, const char * app_argv[])
             fprintf(stderr, "Failed to set process group ID\n");
         }
 
-        redirect_out();
-        redirect_in();
+//        redirect_out();
+//        redirect_in();
         close_all_fds();
 
         pid_t pid = fork();
@@ -95,15 +91,15 @@ static void get_charging_state(const char * value, bool *charging, bool *dischar
     {
         down = true;
     }
-    else if( (strcmp(value, "Unknown") != 0) 
+    else if( (strcmp(value, "Unknown") != 0)
             && (strcmp(value, "Full") != 0))
     {
         fprintf(stderr, "State = '%s'", value);
         exit(1);
     }
-    if(charging) 
+    if(charging)
         *charging = up;
-    if(discharging) 
+    if(discharging)
         *discharging = down;
 }
 
@@ -203,7 +199,7 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     }
     if(!info->present)
         return;
-    
+
 
     read_sys(name, "status", result, sizeof(result));
     get_charging_state(result, &info->charging, &info->discharging);
@@ -219,7 +215,7 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     else
     {
         read_sys(name, "charge_full", result, sizeof(result));
-        info->last_full_capacity = uamphr2joules(to_int(result), 
+        info->last_full_capacity = uamphr2joules(to_int(result),
                 info->volts);
     }
 
@@ -290,7 +286,7 @@ static int calc_percent(float part, float total)
     }
     return -1;
 }
- 
+
 
 /**
  * print info
@@ -303,11 +299,11 @@ void print_self(struct BatteryInfo_s * info)
         return;
     }
 
-    printf("%s %s\n", info->charging ? "Charging " : "", 
+    printf("%s %s\n", info->charging ? "Charging " : "",
                       info->discharging ? "Discharging" : "");
 
     printf("Max      =%10.1f J (%3i%%)\n", info->max_capacity, 100);
-    printf("Last full=%10.1f J (%3i%%)\n", info->last_full_capacity, 
+    printf("Last full=%10.1f J (%3i%%)\n", info->last_full_capacity,
             calc_percent(info->last_full_capacity, info->max_capacity));
     printf("Current  =%10.1f J (%3i%%)\n", info->current_capacity,
             calc_percent(info->current_capacity, info->max_capacity));
@@ -362,7 +358,7 @@ def open_database(obj):
 /**
  * Check all the batteries
  */
-static int check_batteries(const char * app[])
+static int check_batteries(int argc, const char * argv[], int low_threshold)
 {
     int left = 9999;
     DIR * dir = opendir(SYS_PREFIX);
@@ -377,7 +373,6 @@ static int check_batteries(const char * app[])
                 check_battery(&info, entry->d_name);
                 if(info.present)
                 {
-                    printf( "---\n");
                     print_self(&info);
 #if 0
             open_database(obj)
@@ -388,18 +383,30 @@ static int check_batteries(const char * app[])
         }
         closedir(dir);
     }
-    if(left < 25)
+
+    if(left < low_threshold)
     {
+        const char * app[10];
+        char sLeft[20];
+        int i;
+        for(i = 0; (i < 8) && (i < argc); i++)
+        {
+            app[i] = argv[i];
+        }
+        snprintf(sLeft,sizeof(sLeft),"%i", left);
+        app[i++] = sLeft;
+        app[i] = NULL;
         alert(left, app);
     }
     return left;
 }
 
-int main(int argc, char * argv[])
+int main(int argc, const char * argv[])
 {
-    int i, j;
+    int i;
     int time_to_respawn = 15;
     int reminder_period = 5;
+    int low_threshold = 25;
 
     for(i = 1; i < argc; i++)
     {
@@ -416,6 +423,11 @@ int main(int argc, char * argv[])
                     i++;
                     reminder_period = to_int(argv[i]);
                     break;
+
+                case 't':
+                    i++;
+                    low_threshold = to_int(argv[i]);
+                    break;
             }
         }
         else
@@ -424,24 +436,18 @@ int main(int argc, char * argv[])
         }
     }
 
-    const char * app[10];
-    for(j = 0; (j < 10) && (i < argc); j++,i++)
-    {
-        app[j] = argv[i];
-    }
-    app[j] = NULL;
 
     while(1)
     {
-        int remaining = check_batteries(app);
+        const int remaining = check_batteries(argc - i, &argv[i], low_threshold);
         if( (reminder_period > time_to_respawn)
             || (remaining > time_to_respawn + reminder_period))
         {
             break;
         }
 
-        sleep(60*reminder_period);
+        sleep(60 * reminder_period);
         time_to_respawn -= reminder_period;
     }
     return EXIT_SUCCESS;
-}   
+}

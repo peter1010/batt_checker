@@ -4,6 +4,7 @@ import os
 import argparse
 import logging
 import stat
+import subprocess
 
 CACHE_FILE="/var/cache/batt_checker/history.txt"
 
@@ -22,12 +23,6 @@ def get_last():
         return parts[0]
     return None
 
-def parse_x_cmdline(argv):
-    """Parse the X cmd for the display"""
-    while argv:
-        arg = argv.pop(0)
-        if arg.startswith(":"):
-            return arg
 
 def get_uid(pid):
     """Get the UID of the PID"""
@@ -44,38 +39,40 @@ def get_environ(pid):
     return environ.split('\0')
 
 
-def get_stdout(pid):
+def get_term(pid):
     try:
-        return os.readlink(os.path.join("/proc", pid, "fd", "2"))
+        fd = os.readlink(os.path.join("/proc", pid, "fd", "2"))
     except (FileNotFoundError, PermissionError):
         return None
+    if fd.startswith("socket:"):
+        return None
+    if fd in ["/dev/null"]:
+        return None
+    return fd
 
-#
-def find_x_display():
+
+def find_displays():
     """Find the X-display so we can pop up a dialog box"""
     displays = set()
-    stdouts = set()
+    terminals = set()
     for pid in os.listdir("/proc"):
         if pid.isdigit():
             display = auth = None
             uid = get_uid(pid)
-            stdout = get_stdout(pid)
             for token in get_environ(pid):
                 if token.startswith("DISPLAY="):
                     display = token[8:]
+                    if display.find(".", display.rfind(":")) < 0:
+                        display += ".0"
                 elif token.startswith("XAUTHORITY="):
                     auth = token[11:]
             if display and auth:
                 displays.add((display, auth))
-            stdouts.add(get_stdout(pid))
-    for stdout in stdouts:
-        print(stdout)
-    for display in displays:
-        print(display)
+            term = get_term(pid)
+            if term:
+                terminals.add(get_term(pid))
+    return terminals, displays
 
-#            if tokens[0] in ["/usr/bin/X","/usr/bin/Xorg"]:
-#                display.add(parse_x_cmdline(tokens))
-#    return display
 
 
 #def write_record(out_fp, ip_addr):
@@ -103,16 +100,50 @@ def find_x_display():
 #        with open(CACHE_FILE, "w") as out_fp:
 #            write_record(out_fp, ip_addr)
 
+def alert_terminals(terminals, left):
+    for term in terminals:
+        with open(term,"w") as fp:
+            fp.write("Battery is low (%i mins to go)\n" % left)
+
+
+def alert_display(env, left):
+    xmessage = os.path.join("/usr","bin","xmessage")
+    if os.path.exists(xmessage):
+        subprocess.call([xmessage, "Battery is low"], env=env)
+            
+
+def alert_displays(displays, left):
+    for (display, auth) in displays:
+        st = os.stat(auth)
+        uid, gid = st.st_uid, st.st_gid
+        saved_uid, saved_gid = os.getuid(), os.getgid()
+        try:
+            os.setegid(gid)
+            os.seteuid(uid)
+            env = {}
+            env["DISPLAY"] = display
+            env["XAUTHORITY"] = auth
+            alert_display(env, left)
+        finally:
+            os.seteuid(saved_uid)
+            os.setegid(saved_gid)
+
+
 def run():
     parser = argparse.ArgumentParser(
             description="Battery Low alerter")
     parser.add_argument('-d','--debug', action="store_true", default=False, 
             help="Enable debug")
+    parser.add_argument('left', help="time left")
     args = parser.parse_args()
     log = logging.getLogger()
     if args.debug:
         print("Debug enabled")
         log.setLevel(logging.DEBUG)
+    left = int(args.left)
+    terminals, displays = find_displays()
+    alert_terminals(terminals, left)
+    alert_displays(displays, left)
 
-    print(find_x_display())
+
 run()
