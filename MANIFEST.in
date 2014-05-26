@@ -1,0 +1,4 @@
+global-include *.c 
+global-include *.mk 
+global-include Makefile
+global-exclude batt_checker
