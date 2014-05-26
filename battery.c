@@ -299,9 +299,6 @@ void print_self(struct BatteryInfo_s * info)
         return;
     }
 
-    printf("%s %s\n", info->charging ? "Charging " : "",
-                      info->discharging ? "Discharging" : "");
-
     printf("Max      =%10.1f J (%3i%%)\n", info->max_capacity, 100);
     printf("Last full=%10.1f J (%3i%%)\n", info->last_full_capacity,
             calc_percent(info->last_full_capacity, info->max_capacity));
@@ -317,13 +314,13 @@ void print_self(struct BatteryInfo_s * info)
     {
         float left = info->last_full_capacity - info->current_capacity;
         int minutes = (int)(left / info->rate / 60.0 + 0.5);
-        printf("rate=%f J/s\n", info->rate);
-        printf( "mins letf=%i\n", minutes);
+        printf("Charging rate=%f J/s\n", info->rate);
+        printf( "%i mins left to reach last full\n", minutes);
     }
     if(info->discharging)
     {
-        printf("rate=%f J/s\n", info->rate);
-        printf("left %i mins\n", calc_left(info, 0));
+        printf("Discharging rate=%f J/s\n", info->rate);
+        printf("%i mins left before flat\n", calc_left(info, 0));
     }
 }
 
