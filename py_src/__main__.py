@@ -5,6 +5,7 @@ import argparse
 import logging
 import stat
 import subprocess
+import tkinter
 
 CACHE_FILE="/var/cache/batt_checker/history.txt"
 
@@ -106,11 +107,26 @@ def alert_terminals(terminals, left):
             fp.write("Battery is low (%i mins to go)\n" % left)
 
 
+class Alert(tkinter.Frame):
+    def __init__(self,master):
+        tkinter.Frame.__init__(self, master)
+        self.pack()
+        self.OK = tkinter.Button(self)
+        self.OK["text"] = "OK"
+        self.OK["command"] = self.quit
+        self.OK.pack({"side":"bottom"})
+        self.LABEL = tkinter.Label(self)
+        self.LABEL["text"] = "Battery getting low"
+        self.LABEL.pack({"side":"top"})
+
+
+
+
 def alert_display(env, left):
-    xmessage = os.path.join("/usr","bin","xmessage")
-    if os.path.exists(xmessage):
-        subprocess.call([xmessage, "Battery is low"], env=env)
-            
+    root = tkinter.Tk()
+    app = Alert(master=root)
+    app.mainloop()
+
 
 def alert_displays(displays, left):
     for (display, auth) in displays:
