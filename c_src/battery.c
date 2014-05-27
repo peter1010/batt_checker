@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <time.h>
 
 #define SYS_PREFIX "/sys/class/power_supply"
 
@@ -324,33 +325,30 @@ void print_self(struct BatteryInfo_s * info)
     }
 }
 
-#if 0
+/**
+ * Open the database
+ */
+static void open_database(struct BatteryInfo_s * info)
+{
+    char timestamp[128];
+    time_t t;
+    struct tm * tmp;
 
-def open_database(obj):
-    """Open the database"""
-    try:
-        os.mkdir("/var/cache/battery")
-    except OSError:
-        pass
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    if obj.charging:
-        status = "/"
-    elif obj.discharging:
-        status = "\\"
-    else:
-        status = "-"
-    try:
-        with open("/var/lib/battery/data.log","a") as file_p:
-            file_p.write("%s\t%s\t%9.1f\t%.2f\n" % \
-                  (timestamp, status, obj.current_capacity, obj.volts))
-    except FileNotFoundError:
-        path = "/var/lib/battery"
-        uid = os.getenv("SUDO_UID")
-        gid = os.getenv("SUDO_GID")
-        os.mkdir(path)
-        if uid and gid:
-            os.chown(path, int(uid), int(gid))
-#endif
+    t = time(NULL);
+    tmp = localtime(&t);
+
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tmp);
+
+    const char status = info->charging ? '/' : info->discharging ? '\\' : '-';
+
+    FILE * fp = fopen("/var/cache/batt_checker/data.log","a");
+    if(fp)
+    {
+        fprintf(fp,"%s\t%c\t%9.1f\t%.2f\n",
+                  timestamp, status, info->current_capacity, info->volts);
+        fclose(fp);
+    }
+}
 
 /**
  * Check all the batteries
@@ -371,9 +369,7 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
                 if(info.present)
                 {
                     print_self(&info);
-#if 0
-            open_database(obj)
-#endif
+                    open_database(&info);
                     left = calc_left(&info, 0);
                 }
             }
