@@ -108,23 +108,34 @@ def alert_terminals(terminals, left):
 
 
 class Alert(tkinter.Frame):
-    def __init__(self,master):
+    def __init__(self, master, left):
         tkinter.Frame.__init__(self, master)
+        self.root = master
         self.pack()
+        master.transient()
+        master.attributes("-topmost", True)
         self.OK = tkinter.Button(self)
         self.OK["text"] = "OK"
         self.OK["command"] = self.quit
         self.OK.pack({"side":"bottom"})
         self.LABEL = tkinter.Label(self)
-        self.LABEL["text"] = "Battery getting low"
+        self.LABEL["text"] = "Battery getting low %i mins left" % left
         self.LABEL.pack({"side":"top"})
+        self.OK.bind('<Visibility>', self.painted)
+
+    def painted(self, event):
+        print("painted")
+        self.after_idle(self.grab_focus_for_us)
+
+    def grab_focus_for_us(self):
+        self.root.grab_set_global()
 
 
 
 
-def alert_display(env, left):
+def alert_display(left):
     root = tkinter.Tk()
-    app = Alert(master=root)
+    app = Alert(root, left)
     app.mainloop()
 
 
@@ -136,10 +147,9 @@ def alert_displays(displays, left):
         try:
             os.setegid(gid)
             os.seteuid(uid)
-            env = {}
-            env["DISPLAY"] = display
-            env["XAUTHORITY"] = auth
-            alert_display(env, left)
+            os.putenv("DISPLAY", display)
+            os.putenv("XAUTHORITY", auth)
+            alert_display( left)
         finally:
             os.seteuid(saved_uid)
             os.setegid(saved_gid)
