@@ -111,6 +111,8 @@ class Alert(tkinter.Frame):
     def __init__(self, master, left):
         tkinter.Frame.__init__(self, master)
         self.root = master
+        self.root.geometry("+0-10")
+        self.root.overrideredirect(True)
         self.pack()
         master.transient()
         master.attributes("-topmost", True)
