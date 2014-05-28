@@ -74,6 +74,11 @@ void alert(int left, const char * app_argv[])
             exit(0);
         }
     }
+    else if(pid > 0)
+    {
+        int status;
+        waitpid(&status);
+    }
 }
 
 /**

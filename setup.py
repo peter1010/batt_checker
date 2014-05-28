@@ -13,14 +13,16 @@ class my_install(install.install):
         retVal = super().run()
         if self.root is None or not self.root.endswith("dumb"):
             if not os.getenv("DONT_START"):
+                print("Setup.py starting the services")
                 from py_src import service
                 service.start_service()
         return retVal;
 
+
 def get_batt_checker_exe():
     subprocess.call(['make', '-C', 'c_src'])
-    print("Bing")
     return os.path.join("c_src","__%s__" % os.uname().machine,"batt_checker")
+
 
 setup(name='batt_checker',
       version='1.0',
