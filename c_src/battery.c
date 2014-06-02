@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 
 #define SYS_PREFIX "/sys/class/power_supply"
@@ -77,7 +78,7 @@ void alert(int left, const char * app_argv[])
     else if(pid > 0)
     {
         int status;
-        waitpid(&status);
+        wait(&status);
     }
 }
 
@@ -335,22 +336,18 @@ void print_self(struct BatteryInfo_s * info)
  */
 static void open_database(struct BatteryInfo_s * info)
 {
-    char timestamp[128];
-    time_t t;
-    struct tm * tmp;
-
-    t = time(NULL);
-    tmp = localtime(&t);
-
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tmp);
+    time_t real_time;
+    struct timespec up_time;
+    real_time = time(NULL);
+    clock_gettime(CLOCK_MONOTONIC, &up_time);
 
     const char status = info->charging ? '/' : info->discharging ? '\\' : '-';
 
     FILE * fp = fopen("/var/cache/batt_checker/data.log","a");
     if(fp)
     {
-        fprintf(fp,"%s\t%c\t%9.1f\t%.2f\n",
-                  timestamp, status, info->current_capacity, info->volts);
+        fprintf(fp,"%lu\t%lu\t%c\t%9.1f\t%.2f\n",
+                  real_time, up_time.tv_sec, status, info->current_capacity, info->volts);
         fclose(fp);
     }
 }
