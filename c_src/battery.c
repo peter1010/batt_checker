@@ -10,6 +10,8 @@
 #include <time.h>
 
 #define SYS_PREFIX "/sys/class/power_supply"
+#define CACHE_LOG  "/var/cache/batt_checker/data.log"
+#define WORST_RATE "/var/cache/batt_checker/discharge"
 
 
 static void close_all_fds()
@@ -285,6 +287,27 @@ static int calc_left(struct BatteryInfo_s * info, float min)
     return 999;
 }
 
+/**
+ * Open the database
+ */
+static int calc_next_period(struct BatteryInfo_s * info, float min)
+{
+    float rate = 15;
+    float left = info->current_capacity - min;
+
+    FILE * fp = fopen(WORST_RATE,"r");
+    if(fp)
+    {
+        char buf[512];
+        int got = fread(buf, sizeof(buf), 1, fp);
+        buf[got] = '\0';
+        fclose(fp);
+        rate = strtof(buf, 0);
+    }
+    return (int)(left / rate / 60.0 + 0.5);
+}
+
+
 static int calc_percent(float part, float total)
 {
     if(total > part)
@@ -343,7 +366,7 @@ static void open_database(struct BatteryInfo_s * info)
 
     const char status = info->charging ? '/' : info->discharging ? '\\' : '-';
 
-    FILE * fp = fopen("/var/cache/batt_checker/data.log","a");
+    FILE * fp = fopen(CACHE_LOG,"a");
     if(fp)
     {
         fprintf(fp,"%lu\t%lu\t%c\t%9.1f\t%.2f\n",
@@ -358,6 +381,7 @@ static void open_database(struct BatteryInfo_s * info)
 static int check_batteries(int argc, const char * argv[], int low_threshold)
 {
     int left = 9999;
+    int next_period = 9999;
     DIR * dir = opendir(SYS_PREFIX);
     if(dir)
     {
@@ -373,6 +397,7 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
                     print_self(&info);
                     open_database(&info);
                     left = calc_left(&info, 0);
+                    next_period = calc_next_period(&info, 0);
                 }
             }
         }
@@ -393,8 +418,9 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
         app[i] = NULL;
         alert(left, app);
     }
-    return left;
+    return next_period;
 }
+
 
 int main(int argc, const char * argv[])
 {
@@ -435,6 +461,7 @@ int main(int argc, const char * argv[])
     while(1)
     {
         const int remaining = check_batteries(argc - i, &argv[i], low_threshold);
+        printf("Remaining %i\n", remaining);
         if( (reminder_period > time_to_respawn)
             || (remaining > time_to_respawn + reminder_period))
         {
