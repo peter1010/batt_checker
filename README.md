@@ -10,4 +10,3 @@ The objective was not to have a systray application, but to have something that 
 The checking app is written in C, the notfication code is in python but only run when notification is required.
 
 In addition the current power is logged to a file for later analysis.
-B
