@@ -7,6 +7,7 @@ CACHE_FILE = "/var/cache/batt_checker/history.txt"
 
 
 def get_last():
+    """Get last line in history file"""
     last_line = ""
     try:
         with open(CACHE_FILE) as in_fp:
@@ -30,23 +31,24 @@ def get_uid(pid):
 def get_environ(pid):
     """Get the environ for PID"""
     try:
-        with open(os.path.join("/proc", pid, "environ")) as fp:
-            environ = fp.read()
+        with open(os.path.join("/proc", pid, "environ")) as in_fp:
+            environ = in_fp.read()
     except PermissionError:
         environ = ""
     return environ.split('\0')
 
 
 def get_term(pid):
+    """Get the output terminal used by the process 'pid'"""
     try:
-        fd = os.readlink(os.path.join("/proc", pid, "fd", "2"))
+        stdout_fd = os.readlink(os.path.join("/proc", pid, "fd", "2"))
     except (FileNotFoundError, PermissionError):
         return None
-    if fd.startswith("socket:"):
+    if stdout_fd.startswith("socket:"):
         return None
-    if fd in ["/dev/null"]:
+    if stdout_fd in ["/dev/null"]:
         return None
-    return fd
+    return stdout_fd
 
 
 def find_displays():
@@ -98,12 +100,15 @@ def find_displays():
 #            write_record(out_fp, ip_addr)
 
 def alert_terminals(terminals, left):
+    """Send an alert message to the terminals"""
     for term in terminals:
-        with open(term, "w") as fp:
-            fp.write("Battery is low (%i mins to go)\n" % left)
+        with open(term, "w") as out_fp:
+            out_fp.write("Battery is low (%i mins to go)\n" % left)
 
 
 class Alert(tkinter.Frame):
+    """TK alert box"""
+
     def __init__(self, master, left):
         tkinter.Frame.__init__(self, master)
         self.root = master
@@ -122,23 +127,26 @@ class Alert(tkinter.Frame):
         self.OK.bind('<Visibility>', self.painted)
 
     def painted(self, event):
-        print("painted")
+        """Callback once the panel has been painted"""
         self.after_idle(self.grab_focus_for_us)
 
     def grab_focus_for_us(self):
+        """Grab the focus"""
         self.root.grab_set_global()
 
 
 def alert_display(left):
+    """Send an alert message to X-server"""
     root = tkinter.Tk()
     app = Alert(root, left)
     app.mainloop()
 
 
 def alert_displays(displays, left):
+    """Send alert messages"""
     for (display, auth) in displays:
-        st = os.stat(auth)
-        uid, gid = st.st_uid, st.st_gid
+        fst = os.stat(auth)
+        uid, gid = fst.st_uid, fst.st_gid
         saved_uid, saved_gid = os.getuid(), os.getgid()
         try:
             os.setegid(gid)
@@ -152,6 +160,7 @@ def alert_displays(displays, left):
 
 
 def run():
+    """Main entry point"""
     parser = argparse.ArgumentParser(
         description="Battery Low alerter"
     )
