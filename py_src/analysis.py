@@ -1,10 +1,10 @@
-import time
-
 def analysis_charge(change):
     print(change)
 
 
 min_charge = 0
+
+
 def analysis_discharge(charge):
     global min_charge
     if charge < min_charge:
@@ -29,7 +29,7 @@ def parse():
                 max_period = period + 1
                 if min_period > 0:
                     change = (cap - prev_cap)/period
-                    print(change,period)
+                    print(change, period)
                     if change < 0:
                         analysis_discharge(change)
                     else:

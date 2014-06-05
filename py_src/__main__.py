@@ -1,13 +1,10 @@
-import sys
-import time
 import os
 import argparse
 import logging
-import stat
-import subprocess
 import tkinter
 
-CACHE_FILE="/var/cache/batt_checker/history.txt"
+CACHE_FILE = "/var/cache/batt_checker/history.txt"
+
 
 def get_last():
     last_line = ""
@@ -16,7 +13,7 @@ def get_last():
             for line in in_fp:
                 line.strip()
                 if line:
-                    lasy_line = line
+                    last_line = line
     except FileNotFoundError:
         pass
     parts = last_line.split()
@@ -75,24 +72,23 @@ def find_displays():
     return terminals, displays
 
 
-
-#def write_record(out_fp, ip_addr):
+# def write_record(out_fp, ip_addr):
 #    out_fp.write(ip_addr)
 #    out_fp.write("\t")
 #    out_fp.write(str(time.time()))
 #    out_fp.write("\n")
- 
 
-#def make_path(pathname):
+
+# def make_path(pathname):
 #    if os.path.exists(pathname):
 #        return
 #    root = os.path.dirname(pathname)
 #    if not os.path.exists(root):
 #        make_path(root)
 #    os.mkdir(pathname)
-    
 
-#def record(ip_addr):
+
+# def record(ip_addr):
 #    try:
 #        with open(CACHE_FILE, "a") as out_fp:
 #            write_record(out_fp, ip_addr)
@@ -103,7 +99,7 @@ def find_displays():
 
 def alert_terminals(terminals, left):
     for term in terminals:
-        with open(term,"w") as fp:
+        with open(term, "w") as fp:
             fp.write("Battery is low (%i mins to go)\n" % left)
 
 
@@ -119,10 +115,10 @@ class Alert(tkinter.Frame):
         self.OK = tkinter.Button(self)
         self.OK["text"] = "OK"
         self.OK["command"] = self.quit
-        self.OK.pack({"side":"bottom"})
+        self.OK.pack({"side": "bottom"})
         self.LABEL = tkinter.Label(self)
         self.LABEL["text"] = "Battery getting low %i mins left" % left
-        self.LABEL.pack({"side":"top"})
+        self.LABEL.pack({"side": "top"})
         self.OK.bind('<Visibility>', self.painted)
 
     def painted(self, event):
@@ -131,8 +127,6 @@ class Alert(tkinter.Frame):
 
     def grab_focus_for_us(self):
         self.root.grab_set_global()
-
-
 
 
 def alert_display(left):
@@ -151,7 +145,7 @@ def alert_displays(displays, left):
             os.seteuid(uid)
             os.putenv("DISPLAY", display)
             os.putenv("XAUTHORITY", auth)
-            alert_display( left)
+            alert_display(left)
         finally:
             os.seteuid(saved_uid)
             os.setegid(saved_gid)
@@ -159,9 +153,10 @@ def alert_displays(displays, left):
 
 def run():
     parser = argparse.ArgumentParser(
-            description="Battery Low alerter")
-    parser.add_argument('-d','--debug', action="store_true", default=False, 
-            help="Enable debug")
+        description="Battery Low alerter"
+    )
+    parser.add_argument('-d', '--debug', action="store_true", default=False,
+                        help="Enable debug")
     parser.add_argument('left', help="time left")
     args = parser.parse_args()
     log = logging.getLogger()
