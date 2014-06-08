@@ -6,8 +6,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
 
 #define SYS_PREFIX "/sys/class/power_supply"
+#define CACHE_LOG  "/var/cache/batt_checker/data.log"
+#define WORST_RATE "/var/cache/batt_checker/discharge"
 
 
 static void close_all_fds()
@@ -72,6 +76,11 @@ void alert(int left, const char * app_argv[])
         {
             exit(0);
         }
+    }
+    else if(pid > 0)
+    {
+        int status;
+        wait(&status);
     }
 }
 
@@ -278,6 +287,27 @@ static int calc_left(struct BatteryInfo_s * info, float min)
     return 999;
 }
 
+/**
+ * Open the database
+ */
+static int calc_next_period(struct BatteryInfo_s * info, float min)
+{
+    float rate = 15;
+    float left = info->current_capacity - min;
+
+    FILE * fp = fopen(WORST_RATE,"r");
+    if(fp)
+    {
+        char buf[512];
+        int got = fread(buf, sizeof(buf), 1, fp);
+        buf[got] = '\0';
+        fclose(fp);
+        rate = strtof(buf, 0);
+    }
+    return (int)(left / rate / 60.0 + 0.5);
+}
+
+
 static int calc_percent(float part, float total)
 {
     if(total > part)
@@ -324,33 +354,26 @@ void print_self(struct BatteryInfo_s * info)
     }
 }
 
-#if 0
+/**
+ * Open the database
+ */
+static void open_database(struct BatteryInfo_s * info)
+{
+    time_t real_time;
+    struct timespec up_time;
+    real_time = time(NULL);
+    clock_gettime(CLOCK_MONOTONIC, &up_time);
 
-def open_database(obj):
-    """Open the database"""
-    try:
-        os.mkdir("/var/cache/battery")
-    except OSError:
-        pass
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    if obj.charging:
-        status = "/"
-    elif obj.discharging:
-        status = "\\"
-    else:
-        status = "-"
-    try:
-        with open("/var/lib/battery/data.log","a") as file_p:
-            file_p.write("%s\t%s\t%9.1f\t%.2f\n" % \
-                  (timestamp, status, obj.current_capacity, obj.volts))
-    except FileNotFoundError:
-        path = "/var/lib/battery"
-        uid = os.getenv("SUDO_UID")
-        gid = os.getenv("SUDO_GID")
-        os.mkdir(path)
-        if uid and gid:
-            os.chown(path, int(uid), int(gid))
-#endif
+    const char status = info->charging ? '/' : info->discharging ? '\\' : '-';
+
+    FILE * fp = fopen(CACHE_LOG,"a");
+    if(fp)
+    {
+        fprintf(fp,"%lu\t%lu\t%c\t%9.1f\t%.2f\n",
+                  real_time, up_time.tv_sec, status, info->current_capacity, info->volts);
+        fclose(fp);
+    }
+}
 
 /**
  * Check all the batteries
@@ -358,6 +381,7 @@ def open_database(obj):
 static int check_batteries(int argc, const char * argv[], int low_threshold)
 {
     int left = 9999;
+    int next_period = 9999;
     DIR * dir = opendir(SYS_PREFIX);
     if(dir)
     {
@@ -371,10 +395,9 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
                 if(info.present)
                 {
                     print_self(&info);
-#if 0
-            open_database(obj)
-#endif
+                    open_database(&info);
                     left = calc_left(&info, 0);
+                    next_period = calc_next_period(&info, 0);
                 }
             }
         }
@@ -395,8 +418,9 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
         app[i] = NULL;
         alert(left, app);
     }
-    return left;
+    return next_period;
 }
+
 
 int main(int argc, const char * argv[])
 {
@@ -437,6 +461,7 @@ int main(int argc, const char * argv[])
     while(1)
     {
         const int remaining = check_batteries(argc - i, &argv[i], low_threshold);
+        printf("Remaining %i\n", remaining);
         if( (reminder_period > time_to_respawn)
             || (remaining > time_to_respawn + reminder_period))
         {
