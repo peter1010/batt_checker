@@ -27,7 +27,7 @@ setup(
     name='batt_checker',
     version='1.0',
     description="Check battery levels",
-    url='https://github.com/peter1010/track_my_ip',
+    url='https://github.com/peter1010/batt_checker',
     author='Peter1010',
     author_email='peter1010@localnet',
     license='GPL',
