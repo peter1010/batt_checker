@@ -215,6 +215,15 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
 
     read_sys(name, "voltage_now", result, sizeof(result));
     info->volts = uvolts2volts(to_int(result));
+    {
+        read_sys(name, "voltage_min_design", result, sizeof(result));
+        const float min_voltage = uvolts2volts(to_int(result));
+        if(info->volts < 0.5 * min_voltage)
+        {
+            printf("voltage reading is probably broken\n");
+            info->volts = min_voltage;
+        }
+    }
 
     int status = read_sys(name, "energy_full", result, sizeof(result));
     if(status > 0)
@@ -292,7 +301,7 @@ static int calc_left(struct BatteryInfo_s * info, float min)
  */
 static int calc_next_period(struct BatteryInfo_s * info, float min)
 {
-    float rate = 15;
+    float worst_rate = 15;
     float left = info->current_capacity - min;
 
     FILE * fp = fopen(WORST_RATE,"r");
@@ -302,9 +311,13 @@ static int calc_next_period(struct BatteryInfo_s * info, float min)
         int got = fread(buf, sizeof(buf), 1, fp);
         buf[got] = '\0';
         fclose(fp);
-        rate = strtof(buf, 0);
+        worst_rate = strtof(buf, 0);
     }
-    return (int)(left / rate / 60.0 + 0.5);
+    if(worst_rate < info->rate)
+    {
+        worst_rate = info->rate;
+    }
+    return (int)(left / (60.0 * worst_rate) + 0.5);
 }
 
 
