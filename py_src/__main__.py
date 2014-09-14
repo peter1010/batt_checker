@@ -1,9 +1,11 @@
 import os
+import sys
 import argparse
 import logging
 import tkinter
 
 CACHE_FILE = "/var/cache/batt_checker/history.txt"
+PID_FILE = "/tmp/batt_checker.pid"
 
 
 def get_last():
@@ -158,14 +160,34 @@ def alert_displays(displays, left):
             os.seteuid(saved_uid)
             os.setegid(saved_gid)
 
+def lock():
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE, "r") as in_fp:
+            pid = int(in_fp.read())
+        cmdline = "/proc/{}/cmdline".format(pid)
+        if os.path.exists(cmdline):
+            with open(cmdline, "r") as in_fp:
+                cmdline = in_fp.read()
+            if cmdline.startswith("python") and cmdline.find(sys.argv[0]) >= 0:
+                return False
+    if not os.path.exists(os.path.dirname(PID_FILE)):
+        os.mkdir(os.path.dirname(PID_FILE))
+    with open(PID_FILE, "w") as out_fp:
+        out_fp.write("{}".format(os.getpid()))
+    return True
 
 def run():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="Battery Low alerter"
+            description="Battery Low alerter"
     )
-    parser.add_argument('-d', '--debug', action="store_true", default=False,
-                        help="Enable debug")
+    parser.add_argument(
+        '-d',
+        '--debug',
+        action="store_true",
+        default=False,
+        help="Enable debug"
+    )
     parser.add_argument('left', help="time left")
     args = parser.parse_args()
     log = logging.getLogger()
@@ -175,7 +197,13 @@ def run():
     left = int(args.left)
     terminals, displays = find_displays()
     alert_terminals(terminals, left)
-    alert_displays(displays, left)
+    # Avoid double focus grab :)
+    if lock():
+        try:
+            alert_displays(displays, left)
+        finally:
+            os.unlink(PID_FILE)
 
 
-run()
+if __name__ == "__main__":
+    run()
