@@ -57,13 +57,13 @@ void alert(int left, const char * app_argv[])
     if(pid == 0)      /* Child */
     {
         /* Group child and any grand children under the same process group */
-        if(setpgid(pid, 0) != 0)
+        if(setsid() < 0)
         {
-            fprintf(stderr, "Failed to set process group ID\n");
+            fprintf(stderr, "Failed to setsid\n");
         }
 
-//        redirect_out();
-//        redirect_in();
+        redirect_out();
+        redirect_in();
         close_all_fds();
 
         pid_t pid = fork();
