@@ -9,11 +9,17 @@
 #include <sys/wait.h>
 #include <time.h>
 
+#include "battery_info.h"
+
 #define SYS_PREFIX "/sys/class/power_supply"
 #define CACHE_LOG  "/var/cache/batt_checker/data.log"
 #define WORST_RATE "/var/cache/batt_checker/discharge"
 
-
+/**
+ * Close all file descriptors accept stdin, stdout and stderr
+ * Used after a fork() so that child only has access to the
+ * standard IO
+ */
 static void close_all_fds()
 {
     const int maxFd = sysconf(_SC_OPEN_MAX);
@@ -39,6 +45,9 @@ static void redirect_out()
     }
 }
 
+/**
+ * Redirect stdin & from /dev/null
+ */
 static void redirect_in()
 {
     const int fd_null_in = open("/dev/null", O_WRONLY);
@@ -48,8 +57,14 @@ static void redirect_in()
         close(fd_null_in);
     }
 }
-
-void alert(int left, const char * app_argv[])
+/**
+ * Generate an alert dialog to indicate battery is getting low.
+ * This is done by forking another process to do the alert.
+ *
+ * @param[in] Estimated time left until battery is flat (in mins)
+ * @param[in] The App plus args that does the alert dialog
+ */
+static void alert(int left, const char * app_argv[])
 {
     printf("Alert Left =%i\n", left);
 
@@ -85,7 +100,11 @@ void alert(int left, const char * app_argv[])
 }
 
 /**
- * Convert value into two bool values
+ * Convert text charging state value into two bool values
+ *
+ * @param[in] value The text charging state
+ * @param[out] charging True if value implies charging is happening
+ * @param[out] discharging True if value implies discharging is happening
  */
 static void get_charging_state(const char * value, bool *charging, bool *discharging)
 {
@@ -147,8 +166,15 @@ static float uvolts2volts(int value)
 
 /**
  * read proc file system
+ *
+ * @param[in] base The battery info directory in the proc filesystem
+ * @param[in] file The file in the base directory
+ * @param[out] result The buffer to put contents of the file after reading it
+ * @param[out] maxlen The maximum size of buffer
+ *
+ * @return The actual number of bytes place in result buffer
  */
-size_t read_sys(const char * base, const char * file, char * result, size_t maxlen)
+static size_t read_sys(const char * base, const char * file, char * result, size_t maxlen)
 {
     size_t length = 0;
     char pathname[1024];
@@ -168,25 +194,26 @@ size_t read_sys(const char * base, const char * file, char * result, size_t maxl
     return length;
 }
 
-struct BatteryInfo_s
-{
-    int present;
-    bool charging;
-    bool discharging;
-    float max_capacity;
-    float last_full_capacity;
-    float current_capacity;
-    float min_capacity;
-    float volts;
-    float rate;
-};
-
+/**
+ * Convert value (a string) to a integer
+ *
+ * @param[in] value as a string
+ *
+ * @return as an integer
+ */
 static int to_int(const char * value)
 {
     return strtol(value, NULL, 10);
 }
 
-void check_battery(struct BatteryInfo_s * info, const char * name)
+/**
+ * Fill in the BatterInfo_t structure with information read from the proc
+ * filesystem about battery name
+ *
+ * @param[out] info The Battery status
+ * @param[in] name The name of the battery
+ */
+static void check_battery(BatteryInfo_t * info, const char * name)
 {
     memset(info, 0, sizeof(*info));
 
@@ -283,7 +310,15 @@ void check_battery(struct BatteryInfo_s * info, const char * name)
     }
 }
 
-static int calc_left(struct BatteryInfo_s * info, float min)
+/**
+ * Estimate in mins until battery reaches minimum charge
+ *
+ * @param[in] info The battery status
+ * @param[in] min The minimum charge (in Joules)
+ *
+ * @return estimated time in minutes
+ */
+static int calc_left(const BatteryInfo_t * info, float min)
 {
     if(info->discharging)
     {
@@ -297,9 +332,16 @@ static int calc_left(struct BatteryInfo_s * info, float min)
 }
 
 /**
- * Open the database
+ * Open the database that contains history of previous measurements
+ * and calculate the worst case (minimum time) for when battery will
+ * go below the min threshold.
+ *
+ * @param[in] info The battery status
+ * @param[in] min The minimum charge (in Joules)
+ *
+ * @return estimared time in minutes
  */
-static int calc_next_period(struct BatteryInfo_s * info, float min)
+static int calc_next_period(const BatteryInfo_t * info, float min)
 {
     float worst_rate = 15;
     float left = info->current_capacity - min;
@@ -320,7 +362,14 @@ static int calc_next_period(struct BatteryInfo_s * info, float min)
     return (int)(left / (60.0 * worst_rate) + 0.5);
 }
 
-
+/**
+ * Calculate part/total as a percentage
+ *
+ * @param[in] part (the numerator)
+ * @param[in] total (the denomator)
+ *
+ * @return percentage or -1 if out of range
+ */
 static int calc_percent(float part, float total)
 {
     if(total > part)
@@ -333,8 +382,10 @@ static int calc_percent(float part, float total)
 
 /**
  * print info
+ *
+ * @param[in] info The battery status
  */
-void print_self(struct BatteryInfo_s * info)
+void print_self(const BatteryInfo_t * info)
 {
     if(!info->present)
     {
@@ -368,9 +419,11 @@ void print_self(struct BatteryInfo_s * info)
 }
 
 /**
- * Open the database
+ * Write to the history database
+ *
+ * @param[in] info The battery status
  */
-static void open_database(struct BatteryInfo_s * info)
+static void open_database(const BatteryInfo_t * info)
 {
     time_t real_time;
     struct timespec up_time;
@@ -389,7 +442,14 @@ static void open_database(struct BatteryInfo_s * info)
 }
 
 /**
- * Check all the batteries
+ * Check all the batteries, if one is about to expire before low_threshold
+ * Alert the user
+ *
+ * @param[in] argc Number of args for the alert program
+ * @param[in] argv List of arguments for the alert program
+ * @param[in] low_threshold In mins the threshold
+ *
+ * @return The time in mins whn we should check again
  */
 static int check_batteries(int argc, const char * argv[], int low_threshold)
 {
@@ -401,7 +461,7 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
         struct dirent * entry;
         while((entry = readdir(dir)))
         {
-            struct BatteryInfo_s info;
+            BatteryInfo_t info;
             if(entry->d_name[0] != '.')
             {
                 check_battery(&info, entry->d_name);
@@ -434,7 +494,9 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
     return next_period;
 }
 
-
+/**
+ * main entry point
+ */
 int main(int argc, const char * argv[])
 {
     int i;
