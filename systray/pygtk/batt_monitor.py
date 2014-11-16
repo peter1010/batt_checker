@@ -2,19 +2,60 @@
 
 import gtk
 import gobject
+import socket
+import os
+
+BATTERY_FULL = 'battery-full'
+BATTERY_GOOD = 'battery-good'
+BATTERY_LOW = 'battery-low'
+BATTERY_CAUTION = 'battery-caution'
+
+icons = \
+(
+    BATTERY_FULL,
+    BATTERY_GOOD,
+    BATTERY_LOW,
+    BATTERY_CAUTION,
+)
 
 
-class SystrayIconApp:
+class SystrayApp:
+
     def __init__(self):
         self.tray = gtk.StatusIcon()
-        self.tray.set_from_stock(gtk.STOCK_ABOUT)
-        self.tray.set_from_icon_name("battery-full")
+        self.tray.set_from_icon_name(BATTERY_GOOD)
         self.tray.connect('popup-menu', self.on_right_click)
         self.tray.set_tooltip(('battery status'))
-        gobject.timeout_add_seconds(1, self.callback)
+        self.open_listener()
 
-    def callback(self):
-        print "hello"
+    def __del__(self):
+        os.unlink('/tmp/batt_checker')
+
+    def open_listener(self):
+        if os.path.exists('/tmp/batt_checker'):
+            os.unlink('/tmp/batt_checker')
+        fd = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        fd.bind('/tmp/batt_checker')
+        gobject.io_add_watch(fd, gobject.IO_IN, self.cb_update_status)
+
+    def cb_update_status(self, fd, condition):
+        data = fd.recv(1024)
+        tokens = data.split()
+        if len(tokens) == 2 and tokens[1] == "ALERT":
+            self.alert = True;
+        else:
+            self.alert = False;
+        self.fullness = int(tokens[0])
+        self.tray.set_tooltip(('battery status %i %%' % self.fullness))
+        if self.alert:
+            self.tray.set_from_icon_name(BATTERY_CAUTION)
+        elif self.fullness > 75:
+            self.tray.set_from_icon_name(BATTERY_FULL)
+        elif self.fullness >= 50:
+            self.tray.set_from_icon_name(BATTERY_GOOD)
+        else:
+            self.tray.set_from_icon_name(BATTERY_LOW)
+
         return True
 
     def on_right_click(self, icon, event_button, event_time):
@@ -40,8 +81,8 @@ class SystrayIconApp:
     def show_about_dialog(self, widget):
         about_dialog = gtk.AboutDialog()
         about_dialog.set_destroy_with_parent (True)
-        about_dialog.set_icon_name ("SystrayIcon")
-        about_dialog.set_name('SystrayIcon')
+        about_dialog.set_icon_name ("Battery Status")
+        about_dialog.set_name('Battery Status')
         about_dialog.set_version('0.1')
         about_dialog.set_copyright("(C) 2014")
         about_dialog.set_comments(("Battery Mon"))
@@ -50,6 +91,6 @@ class SystrayIconApp:
         about_dialog.destroy()
 
 if __name__ == "__main__":
-    SystrayIconApp()
+    SystrayApp()
     gtk.main()
 
