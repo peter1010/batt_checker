@@ -3,7 +3,7 @@ Description=Check battery
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/batt_checker python3 -m batt_checker
+ExecStart=/usr/bin/batt_checker -s /tmp/batt_checker python3 -m batt_checker
 Nice=19
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
