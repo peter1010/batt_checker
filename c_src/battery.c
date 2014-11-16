@@ -8,12 +8,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "battery_info.h"
 
 #define SYS_PREFIX "/sys/class/power_supply"
 #define CACHE_LOG  "/var/cache/batt_checker/data.log"
-#define WORST_RATE "/var/cache/batt_checker/discharge"
+#define WORST_RATE "/var/cache/batt_checker/worst_discharge_rate"
+#define MEAN_RATE  "/var/cache/batt_checker/mean_discharge_rate"
 
 /**
  * Close all file descriptors accept stdin, stdout and stderr
@@ -244,7 +247,12 @@ static void check_battery(BatteryInfo_t * info, const char * name)
     info->volts = uvolts2volts(to_int(result));
     {
         read_sys(name, "voltage_min_design", result, sizeof(result));
-        const float min_voltage = uvolts2volts(to_int(result));
+        float min_voltage = uvolts2volts(to_int(result));
+        if(min_voltage > 100)
+        {
+            /* Some times volts are in pico-volts, err.. */
+            min_voltage /= 1000;
+        }
         if(info->volts < 0.5 * min_voltage)
         {
             printf("voltage reading is probably broken\n");
@@ -323,12 +331,48 @@ static int calc_left(const BatteryInfo_t * info, float min)
     if(info->discharging)
     {
         float left = info->current_capacity - min;
-        if(info->rate > 0.0001)
+        float mean_rate = info->rate;
+
+        if(mean_rate <= 0.0001)
         {
-            return (int)(left / info->rate / 60.0 + 0.5);
+            FILE * fp = fopen(MEAN_RATE,"r");
+            if(fp)
+            {
+                char buf[512];
+                int got = fread(buf, sizeof(buf), 1, fp);
+                buf[got] = '\0';
+                fclose(fp);
+                mean_rate = strtof(buf, 0);
+            }
         }
+        return (int)(left / mean_rate / 60.0 + 0.5);
     }
     return 999;
+}
+
+/**
+ * Calculate part/total as a percentage
+ *
+ * @param[in] part (the numerator)
+ * @param[in] total (the denomator)
+ *
+ * @return percentage or -1 if out of range
+ */
+static int calc_percent(float part, float total)
+{
+    if(total > part)
+    {
+        return (int)(part*100/total + 0.5);
+    }
+    return -1;
+}
+
+
+
+static int calc_fullness(const BatteryInfo_t * info, float min)
+{
+    return calc_percent(info->current_capacity - min, 
+                        info->last_full_capacity - min);
 }
 
 /**
@@ -339,7 +383,7 @@ static int calc_left(const BatteryInfo_t * info, float min)
  * @param[in] info The battery status
  * @param[in] min The minimum charge (in Joules)
  *
- * @return estimared time in minutes
+ * @return estimated time in minutes
  */
 static int calc_next_period(const BatteryInfo_t * info, float min)
 {
@@ -361,24 +405,6 @@ static int calc_next_period(const BatteryInfo_t * info, float min)
     }
     return (int)(left / (60.0 * worst_rate) + 0.5);
 }
-
-/**
- * Calculate part/total as a percentage
- *
- * @param[in] part (the numerator)
- * @param[in] total (the denomator)
- *
- * @return percentage or -1 if out of range
- */
-static int calc_percent(float part, float total)
-{
-    if(total > part)
-    {
-        return (int)(part*100/total + 0.5);
-    }
-    return -1;
-}
-
 
 /**
  * print info
@@ -441,6 +467,39 @@ static void open_database(const BatteryInfo_t * info)
     }
 }
 
+void signal_sock_listener(const char * sock, int fullness, bool alert)
+{
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    strncpy(addr.sun_path, sock, sizeof(addr.sun_path));
+    addr.sun_path[sizeof(addr.sun_path)-1] = '\0';
+    addr.sun_family = AF_UNIX;
+
+    const int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if(fd >= 0)
+    {
+        if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+        {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "%i %s\n", fullness, alert ? "ALERT" : "");
+            int length = send(fd, msg, strlen(msg), 0);
+            if(length < 0)
+            {
+                perror("send");
+            }
+            else
+            {
+                printf("Signalling '%s' %i\n", sock, length);
+            }
+        }
+        close(fd);
+    }
+    else
+    {
+        printf("Failed to create unix socket\n");
+    }
+}
+
 /**
  * Check all the batteries, if one is about to expire before low_threshold
  * Alert the user
@@ -451,9 +510,11 @@ static void open_database(const BatteryInfo_t * info)
  *
  * @return The time in mins whn we should check again
  */
-static int check_batteries(int argc, const char * argv[], int low_threshold)
+static int check_batteries(int argc, const char * argv[], const char * sig_sock, 
+        int low_threshold)
 {
     int left = 9999;
+    int fullness = 100;
     int next_period = 9999;
     DIR * dir = opendir(SYS_PREFIX);
     if(dir)
@@ -470,6 +531,7 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
                     print_self(&info);
                     open_database(&info);
                     left = calc_left(&info, 0);
+                    fullness = calc_fullness(&info, 0);
                     next_period = calc_next_period(&info, 0);
                 }
             }
@@ -477,7 +539,14 @@ static int check_batteries(int argc, const char * argv[], int low_threshold)
         closedir(dir);
     }
 
-    if(left < low_threshold)
+    const bool need_to_alert = left < low_threshold ? true : false;
+
+    if(sig_sock)
+    {
+        signal_sock_listener(sig_sock, fullness, need_to_alert);
+    }
+
+    if(need_to_alert)
     {
         const char * app[10];
         char sLeft[20];
@@ -503,6 +572,7 @@ int main(int argc, const char * argv[])
     int time_to_respawn = 15;
     int reminder_period = 5;
     int low_threshold = 25;
+    const char * sig_sock = NULL;
 
     for(i = 1; i < argc; i++)
     {
@@ -524,6 +594,10 @@ int main(int argc, const char * argv[])
                     i++;
                     low_threshold = to_int(argv[i]);
                     break;
+
+                case 's':
+                    i++;
+                    sig_sock = argv[i];
             }
         }
         else
@@ -535,7 +609,7 @@ int main(int argc, const char * argv[])
 
     while(1)
     {
-        const int remaining = check_batteries(argc - i, &argv[i], low_threshold);
+        const int remaining = check_batteries(argc - i, &argv[i], sig_sock, low_threshold);
         printf("Remaining %i\n", remaining);
         if( (reminder_period > time_to_respawn)
             || (remaining > time_to_respawn + reminder_period))
