@@ -42,7 +42,7 @@ def get_batt_checker_exe(do_compile=True):
 
 setup(
     name='batt_checker',
-    version='1.0',
+    version='1.1',
     description="Check battery levels",
     url='https://github.com/peter1010/batt_checker',
     author='Peter1010',

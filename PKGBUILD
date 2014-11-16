@@ -1,6 +1,6 @@
 pkgbase=batt_tracker
 pkgname=('batt_tracker')
-pkgver=1.0
+pkgver=1.1
 pkgrel=1
 pkgdesc="batt_tracker"
 arch=('any')
