@@ -3,6 +3,7 @@ import sys
 import argparse
 import logging
 import tkinter
+import tkinter.font as tkFont
 
 CACHE_FILE = "/var/cache/batt_checker/history.txt"
 PID_FILE = "/tmp/batt_checker.pid"
@@ -121,10 +122,12 @@ class Alert(tkinter.Frame):
         master.attributes("-topmost", True)
         self.OK = tkinter.Button(self)
         self.OK["text"] = "OK"
+        self.OK["font"] = tkFont.Font(size="30")
         self.OK["command"] = self.quit
         self.OK.pack({"side": "bottom"})
         self.LABEL = tkinter.Label(self)
         self.LABEL["text"] = "Battery getting low %i mins left" % left
+        self.LABEL["font"] = tkFont.Font(size="30")
         self.LABEL.pack({"side": "top"})
         self.OK.bind('<Visibility>', self.painted)
 
