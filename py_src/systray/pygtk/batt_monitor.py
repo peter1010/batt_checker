@@ -25,7 +25,7 @@ class SystrayApp:
         self.tray = gtk.StatusIcon()
         self.tray.set_from_icon_name(BATTERY_GOOD)
         self.tray.connect('popup-menu', self.on_right_click)
-        self.tray.set_tooltip(('battery status'))
+        self.tray.set_tooltip(('battery status ?? %'))
         self.open_listener()
 
     def __del__(self):
@@ -46,15 +46,18 @@ class SystrayApp:
         else:
             self.alert = False;
         self.fullness = int(tokens[0])
-        self.tray.set_tooltip(('battery status %i %%' % self.fullness))
+        self.tray.set_tooltip(('battery status {} %'.format(
+            self.fullness)
+        ))
         if self.alert:
-            self.tray.set_from_icon_name(BATTERY_CAUTION)
+            retVal = self.tray.set_from_icon_name(BATTERY_CAUTION)
         elif self.fullness > 75:
-            self.tray.set_from_icon_name(BATTERY_FULL)
+            retVal = self.tray.set_from_icon_name(BATTERY_FULL)
         elif self.fullness >= 50:
-            self.tray.set_from_icon_name(BATTERY_GOOD)
+            retVal = self.tray.set_from_icon_name(BATTERY_GOOD)
         else:
-            self.tray.set_from_icon_name(BATTERY_LOW)
+            retVal = self.tray.set_from_icon_name(BATTERY_LOW)
+        print(retVal)
 
         return True
 

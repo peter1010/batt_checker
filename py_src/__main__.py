@@ -106,7 +106,7 @@ def alert_terminals(terminals, left):
     """Send an alert message to the terminals"""
     for term in terminals:
         with open(term, "w") as out_fp:
-            out_fp.write("Battery is low (%i mins to go)\n" % left)
+            out_fp.write("Battery is low ({} mins to go)\n".format(left))
 
 
 class Alert(tkinter.Frame):
@@ -126,7 +126,9 @@ class Alert(tkinter.Frame):
         self.OK["command"] = self.quit
         self.OK.pack({"side": "bottom"})
         self.LABEL = tkinter.Label(self)
-        self.LABEL["text"] = "Battery getting low %i mins left" % left
+        self.LABEL["text"] = "Battery getting low {} mins left" .format(
+            left
+        )
         self.LABEL["font"] = tkFont.Font(size="30")
         self.LABEL.pack({"side": "top"})
         self.OK.bind('<Visibility>', self.painted)
