@@ -1,7 +1,7 @@
 pkgbase=batt_tracker
 pkgname=('batt_tracker')
 pkgver=1.1
-pkgrel=2
+pkgrel=3
 pkgdesc="batt_tracker"
 arch=('any')
 url="http:"

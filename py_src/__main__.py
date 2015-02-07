@@ -139,7 +139,14 @@ class Alert(tkinter.Frame):
 
     def grab_focus_for_us(self):
         """Grab the focus"""
-        self.root.grab_set_global()
+        try:
+            self.root.grab_set_global()
+        except tkinter.TclError:
+            pass
+        self.root.after(5*60*1000, self.quit)
+
+    def quit(self):
+        self.root.quit()
 
 
 def alert_display(left):
@@ -173,13 +180,17 @@ def lock():
         if os.path.exists(cmdline):
             with open(cmdline, "r") as in_fp:
                 cmdline = in_fp.read()
-            if cmdline.startswith("python") and cmdline.find(sys.argv[0]) >= 0:
+            if cmdline.startswith("python"):
                 return False
     if not os.path.exists(os.path.dirname(PID_FILE)):
         os.mkdir(os.path.dirname(PID_FILE))
+    our_pid = os.getpid()
     with open(PID_FILE, "w") as out_fp:
-        out_fp.write("{}".format(os.getpid()))
-    return True
+        out_fp.write("{}".format(our_pid))
+    with open(PID_FILE, "r") as in_fp:
+        pid = int(in_fp.read())
+    return pid == our_pid
+
 
 def run():
     """Main entry point"""
