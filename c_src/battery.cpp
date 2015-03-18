@@ -23,7 +23,7 @@
  * Used after a fork() so that child only has access to the
  * standard IO
  */
-static void close_all_fds()
+static void close_all_fds(void)
 {
     const int maxFd = sysconf(_SC_OPEN_MAX);
     int i;
@@ -33,9 +33,10 @@ static void close_all_fds()
 }
 
 /**
- * Redirect stdout & stderr to /dev/null
+ * Redirect stdout & stderr to /dev/null, this is used to
+ * detach from the controlling terminal
  */
-static void redirect_out()
+static void redirect_out(void)
 {
     const int fd_null_out = open("/dev/null", O_RDONLY);
     if(fd_null_out > 0) {
@@ -47,9 +48,10 @@ static void redirect_out()
 }
 
 /**
- * Redirect stdin & from /dev/null
+ * Redirect stdin & from /dev/null, this is used to detach
+ * from the controlling terminal
  */
-static void redirect_in()
+static void redirect_in(void)
 {
     const int fd_null_in = open("/dev/null", O_WRONLY);
     if(fd_null_in > 0) {
@@ -61,15 +63,15 @@ static void redirect_in()
  * Generate an alert dialog to indicate battery is getting low.
  * This is done by forking another process to do the alert.
  *
- * @param[in] Estimated time left until battery is flat (in mins)
- * @param[in] The App plus args that does the alert dialog
+ * @param[in] left Estimated time left until battery is flat (in mins)
+ * @param[in] app_argv The App plus args that does the alert dialog
  */
 static void alert(int left, const char * app_argv[])
 {
     printf("Alert Left =%i\n", left);
 
-    pid_t pid = fork();
-    if(pid == 0) {     /* Child */
+    const pid_t pid1 = fork();
+    if(pid1 == 0) {     /* Child */
         /* Group child and any grand children under the same process group */
         if(setsid() < 0) {
             fprintf(stderr, "Failed to setsid\n");
@@ -79,16 +81,16 @@ static void alert(int left, const char * app_argv[])
         redirect_in();
         close_all_fds();
 
-        pid_t pid = fork();
-        if(pid == 0) {
+        const pid_t pid2 = fork();
+        if(pid2 == 0) {
             execvp(app_argv[0], (char **) app_argv);
             exit(EXIT_FAILURE);
         }
         else {
-            exit(0);
+            exit(EXIT_SUCCESS);
         }
     }
-    else if(pid > 0) {
+    else if(pid1 > 0) {
         int status;
         wait(&status);
     }
@@ -115,17 +117,23 @@ static void get_charging_state(const char * value, bool *charging, bool *dischar
     else if( (strcmp(value, "Unknown") != 0)
             && (strcmp(value, "Full") != 0)) {
         fprintf(stderr, "State = '%s'", value);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
-    if(charging)
+    if(charging) {
         *charging = up;
-    if(discharging)
+    }
+    if(discharging) {
         *discharging = down;
+    }
 }
 
 
 /**
  * Convert uW to W
+ *
+ * @param[in] value Value in micro-watts
+ *
+ * @return Conversion to Watts
  */
 static float uwatts2watts(int value) 
 {
@@ -134,6 +142,10 @@ static float uwatts2watts(int value)
 
 /**
  * Convert uWh to Joules
+ *
+ * @param[in] value Value in micro-watt-hours
+ *
+ * @return Conversion to Joules
  */
 static float uwatthr2joules(int value) 
 {
@@ -141,7 +153,12 @@ static float uwatthr2joules(int value)
 }
 
 /**
- * Convert uWh to Joules
+ * Convert uAh to Joules
+ *
+ * @param[in] value Value in micro-amp-hours
+ * @param[in] volts The voltage
+ *
+ * @return Conversion to Joules
  */
 static float uamphr2joules(int value, float volts) 
 {
@@ -150,6 +167,10 @@ static float uamphr2joules(int value, float volts)
 
 /**
  * Convert uV to V
+ * 
+ * @param[in] value Value in micro-volts
+ *
+ * @return Conversion to Volts
  */
 static float uvolts2volts(int value)
 {
@@ -171,11 +192,12 @@ static size_t read_sys(const char * base, const char * file, char * result, size
     char pathname[1024];
     snprintf(pathname, sizeof(pathname), "%s/%s/%s", SYS_PREFIX, base, file);
 //    printf("pathname='%s'\n", pathname);
-    int f = open(pathname, O_RDONLY);
+    const int f = open(pathname, O_RDONLY);
     if(f) {
         length = read(f, result, maxlen-1);
-        while((length > 0) && (result[length-1] == '\n'))
+        while((length > 0) && (result[length-1] == '\n')) {
             length--;
+        }
 //        printf("reading..%u %u\n", length, maxlen);
 //        perror("");
         close(f);
@@ -196,6 +218,9 @@ static int to_int(const char * value)
     return strtol(value, NULL, 10);
 }
 
+/**
+ * The BatteryInfo constructor
+ */
 BatteryInfo::BatteryInfo()
 {
     memset(this, 0, sizeof(*this));
@@ -212,20 +237,20 @@ void BatteryInfo::check_battery(const char * name)
 {
     char result[512];
     read_sys(name, "type", result, sizeof(result));
-    if(strcmp(result,"Mains") == 0) {
+    if(strcasecmp(result,"mains") == 0) {
         m_present = false;
     }
-    else if(strcmp(result, "Battery") == 0) {
+    else if(strcasecmp(result, "battery") == 0) {
         read_sys(name, "present", result, sizeof(result));
         m_present = to_int(result);
     }
-    else
-    {
+    else {
         fprintf(stderr, "Invalid type '%s'\n", result);
-        exit(1);
+        m_present = false;
     }
-    if(!is_present())
+    if(!is_present()) {
         return;
+    }
 
 
     read_sys(name, "status", result, sizeof(result));
@@ -236,71 +261,59 @@ void BatteryInfo::check_battery(const char * name)
     {
         read_sys(name, "voltage_min_design", result, sizeof(result));
         float min_voltage = uvolts2volts(to_int(result));
-        if(min_voltage > 100)
-        {
+        if(min_voltage > 100) {
             /* Some times volts are in pico-volts, err.. */
             min_voltage /= 1000;
         }
-        if(m_volts < 0.5 * min_voltage)
-        {
+        if(m_volts < 0.5 * min_voltage) {
             printf("voltage reading is probably broken\n");
             m_volts = min_voltage;
         }
     }
 
     int status = read_sys(name, "energy_full", result, sizeof(result));
-    if(status > 0)
-    {
+    if(status > 0) {
         m_last_full_capacity = uwatthr2joules(to_int(result));
     }
-    else
-    {
+    else {
         read_sys(name, "charge_full", result, sizeof(result));
         m_last_full_capacity = uamphr2joules(to_int(result),
                 m_volts);
     }
 
     status = read_sys(name, "energy_full_design", result, sizeof(result));
-    if(status > 0)
-    {
+    if(status > 0) {
         m_max_capacity = uwatthr2joules(to_int(result));
     }
-    else
-    {
+    else {
         read_sys(name, "charge_full_design", result, sizeof(result));
         m_max_capacity = uamphr2joules(to_int(result), m_volts);
     }
 
     status = read_sys(name, "energy_now", result, sizeof(result));
-    if(status >0)
-    {
+    if(status >0) {
         m_current_capacity = uwatthr2joules(to_int(result));
     }
-    else
-    {
+    else {
         read_sys(name, "charge_now", result, sizeof(result));
         m_current_capacity = uamphr2joules(to_int(result),
                 m_volts);
     }
 
     read_sys(name, "alarm", result, sizeof(result));
-    if(status > 0)
-    {
+    if(status > 0) {
         m_min_capacity = uwatthr2joules(to_int(result));
     }
-    else
-    {
+    else {
         m_min_capacity = uamphr2joules(to_int(result),
                 m_volts);
     }
 
     status = read_sys(name, "power_now", result, sizeof(result));
-    if(status > 0)
-    {
+    if(status > 0) {
         m_rate = uwatts2watts(to_int(result));
     }
-    else
-    {
+    else {
         read_sys(name, "current_now", result, sizeof(result));
         m_rate = uwatts2watts(to_int(result) * m_volts);
     }
@@ -316,16 +329,13 @@ void BatteryInfo::check_battery(const char * name)
  */
 int BatteryInfo::calc_left(float min) const
 {
-    if(is_discharging())
-    {
+    if(is_discharging()) {
         float left = m_current_capacity - min;
         float mean_rate = m_rate;
 
-        if(mean_rate <= 0.0001)
-        {
+        if(mean_rate <= 0.0001) {
             FILE * fp = fopen(MEAN_RATE,"r");
-            if(fp)
-            {
+            if(fp) {
                 char buf[512];
                 int got = fread(buf, sizeof(buf), 1, fp);
                 buf[got] = '\0';
@@ -378,16 +388,14 @@ int BatteryInfo::calc_next_period(float min) const
     float left = m_current_capacity - min;
 
     FILE * fp = fopen(WORST_RATE,"r");
-    if(fp)
-    {
+    if(fp) {
         char buf[512];
         int got = fread(buf, sizeof(buf), 1, fp);
         buf[got] = '\0';
         fclose(fp);
         worst_rate = strtof(buf, 0);
     }
-    if(worst_rate < m_rate)
-    {
+    if(worst_rate < m_rate) {
         worst_rate = m_rate;
     }
     return (int)(left / (60.0 * worst_rate) + 0.5);
@@ -400,8 +408,7 @@ int BatteryInfo::calc_next_period(float min) const
  */
 void BatteryInfo::print_self() const
 {
-    if(!is_present())
-    {
+    if(!is_present()) {
         printf("No battery\n");
         return;
     }
@@ -417,15 +424,13 @@ void BatteryInfo::print_self() const
     printf("volts=%.2f v\n", m_volts);
 
 //    info->m_min_capacity = 0
-    if(m_charging)
-    {
+    if(is_charging()) {
         float left = m_last_full_capacity - m_current_capacity;
         int minutes = static_cast<int>(left / m_rate / 60.0 + 0.5);
         printf("Charging rate=%f J/s\n", m_rate);
         printf( "%i mins left to reach last full\n", minutes);
     }
-    if(is_discharging())
-    {
+    if(is_discharging()) {
         printf("Discharging rate=%f J/s\n", m_rate);
         printf("%i mins left before flat\n", calc_left(0));
     }
@@ -443,11 +448,10 @@ void BatteryInfo::open_database() const
     real_time = time(NULL);
     clock_gettime(CLOCK_MONOTONIC, &up_time);
 
-    const char status = m_charging ? '/' : is_discharging() ? '\\' : '-';
+    const char status = is_charging() ? '/' : is_discharging() ? '\\' : '-';
 
     FILE * fp = fopen(CACHE_LOG,"a");
-    if(fp)
-    {
+    if(fp) {
         fprintf(fp,"%lu\t%lu\t%c\t%9.1f\t%.2f\n",
                   real_time, up_time.tv_sec, status, m_current_capacity, m_volts);
         fclose(fp);
@@ -463,26 +467,20 @@ void signal_sock_listener(const char * sock, int fullness, bool alert)
     addr.sun_family = AF_UNIX;
 
     const int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if(fd >= 0)
-    {
-        if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
-        {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "%i %s\n", fullness, alert ? "ALERT" : "");
-            int length = send(fd, msg, strlen(msg), 0);
-            if(length < 0)
-            {
-                perror("send");
-            }
-            else
-            {
-                printf("Signalling '%s' %i\n", sock, length);
-            }
+    if(fd >= 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "%i %s\n", fullness, alert ? "ALERT" : "");
+
+        const int length = sendto(fd, msg, strlen(msg), 0, &addr, sizeof(addr));
+        if(length < 0) {
+            perror("send");
+        }
+        else {
+            printf("Signalling '%s' %i\n", sock, length);
         }
         close(fd);
     }
-    else
-    {
+    else {
         printf("Failed to create unix socket\n");
     }
 }
@@ -504,17 +502,13 @@ static int check_batteries(int argc, const char * argv[], const char * sig_sock,
     int fullness = 100;
     int next_period = 9999;
     DIR * dir = opendir(SYS_PREFIX);
-    if(dir)
-    {
+    if(dir) {
         struct dirent * entry;
-        while((entry = readdir(dir)))
-        {
-            BatteryInfo info;
-            if(entry->d_name[0] != '.')
-            {
+        while((entry = readdir(dir))) {
+            if(entry->d_name[0] != '.') {
+                BatteryInfo info;
                 info.check_battery(entry->d_name);
-                if(info.is_present())
-                {
+                if(info.is_present()) {
                     info.print_self();
                     info.open_database();
                     left = info.calc_left(0);
@@ -528,18 +522,15 @@ static int check_batteries(int argc, const char * argv[], const char * sig_sock,
 
     const bool need_to_alert = left < low_threshold ? true : false;
 
-    if(sig_sock)
-    {
+    if(sig_sock) {
         signal_sock_listener(sig_sock, fullness, need_to_alert);
     }
 
-    if(need_to_alert)
-    {
+    if(need_to_alert) {
         const char * app[10];
         char sLeft[20];
         int i;
-        for(i = 0; (i < 8) && (i < argc); i++)
-        {
+        for(i = 0; (i < 8) && (i < argc); i++) {
             app[i] = argv[i];
         }
         snprintf(sLeft,sizeof(sLeft),"%i", left);
@@ -561,10 +552,8 @@ int main(int argc, const char * argv[])
     int low_threshold = 25;
     const char * sig_sock = NULL;
 
-    for(i = 1; i < argc; i++)
-    {
-        if(argv[i][0] == '-')
-        {
+    for(i = 1; i < argc; i++) {
+        if(argv[i][0] == '-') {
             switch(argv[i][1])
             {
                 case 'p':
@@ -587,20 +576,17 @@ int main(int argc, const char * argv[])
                     sig_sock = argv[i];
             }
         }
-        else
-        {
+        else {
             break;
         }
     }
 
 
-    while(1)
-    {
+    while(1) {
         const int remaining = check_batteries(argc - i, &argv[i], sig_sock, low_threshold);
         printf("Remaining %i\n", remaining);
         if( (reminder_period > time_to_respawn)
-            || (remaining > time_to_respawn + reminder_period))
-        {
+            || (remaining > time_to_respawn + reminder_period)) {
             break;
         }
 

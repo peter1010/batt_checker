@@ -19,6 +19,7 @@ public:
     BatteryInfo();
     bool is_present() const {return m_present;};
     bool is_discharging() const {return m_discharging;};
+    bool is_charging() const {return m_charging;};
     void check_battery(const char * name);
     int calc_left(float min) const;
     int calc_fullness(float min) const;
