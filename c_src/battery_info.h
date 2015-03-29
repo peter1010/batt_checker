@@ -15,12 +15,19 @@ private:
     float m_min_capacity;
     float m_volts;
     float m_rate;
+    const char * m_name;
+
+    void read_type();
+    void read_charging_state();
+    void read_voltage();
+    void read_capacity();
+    void read_rate();
 public:
-    BatteryInfo();
+    BatteryInfo(const char * name);
     bool is_present() const {return m_present;};
     bool is_discharging() const {return m_discharging;};
     bool is_charging() const {return m_charging;};
-    void check_battery(const char * name);
+    void check_battery();
     int calc_left(float min) const;
     int calc_fullness(float min) const;
     int calc_next_period(float min) const;

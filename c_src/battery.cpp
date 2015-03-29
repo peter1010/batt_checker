@@ -83,7 +83,7 @@ static void alert(int left, const char * app_argv[])
 
         const pid_t pid2 = fork();
         if(pid2 == 0) {
-            execvp(app_argv[0], (char **) app_argv);
+            execvp(app_argv[0], const_cast<char **>(app_argv));
             exit(EXIT_FAILURE);
         }
         else {
@@ -96,37 +96,6 @@ static void alert(int left, const char * app_argv[])
     }
 }
 
-/**
- * Convert text charging state value into two bool values
- *
- * @param[in] value The text charging state
- * @param[out] charging True if value implies charging is happening
- * @param[out] discharging True if value implies discharging is happening
- */
-static void get_charging_state(const char * value, bool *charging, bool *discharging)
-{
-    bool up = false;
-    bool down = false;
-
-    if(strcmp(value, "Charging") == 0) {
-        up = true;
-    }
-    else if(strcmp(value, "Discharging") == 0) {
-        down = true;
-    }
-    else if( (strcmp(value, "Unknown") != 0)
-            && (strcmp(value, "Full") != 0)) {
-        fprintf(stderr, "State = '%s'", value);
-        exit(EXIT_FAILURE);
-    }
-    if(charging) {
-        *charging = up;
-    }
-    if(discharging) {
-        *discharging = down;
-    }
-}
-
 
 /**
  * Convert uW to W
@@ -135,7 +104,7 @@ static void get_charging_state(const char * value, bool *charging, bool *dischar
  *
  * @return Conversion to Watts
  */
-static float uwatts2watts(int value) 
+static float uwatts2watts(int value)
 {
     return value / 1000000.0;
 }
@@ -147,7 +116,7 @@ static float uwatts2watts(int value)
  *
  * @return Conversion to Joules
  */
-static float uwatthr2joules(int value) 
+static float uwatthr2joules(int value)
 {
     return (value * 60.0 * 60.0)/1000000.0;
 }
@@ -160,14 +129,14 @@ static float uwatthr2joules(int value)
  *
  * @return Conversion to Joules
  */
-static float uamphr2joules(int value, float volts) 
+static float uamphr2joules(int value, float volts)
 {
     return uwatthr2joules(value * volts);
 }
 
 /**
  * Convert uV to V
- * 
+ *
  * @param[in] value Value in micro-volts
  *
  * @return Conversion to Volts
@@ -221,86 +190,136 @@ static int to_int(const char * value)
 /**
  * The BatteryInfo constructor
  */
-BatteryInfo::BatteryInfo()
+BatteryInfo::BatteryInfo(const char * name)
 {
     memset(this, 0, sizeof(*this));
+    m_name = name;
 }
 
 /**
- * Fill in the BatterInfo_t structure with information read from the proc
- * filesystem about battery name
- *
- * @param[out] info The Battery status
- * @param[in] name The name of the battery
+ * Read and refresh the is battery present flag
  */
-void BatteryInfo::check_battery(const char * name)
+void BatteryInfo::read_type()
 {
-    char result[512];
-    read_sys(name, "type", result, sizeof(result));
-    if(strcasecmp(result,"mains") == 0) {
-        m_present = false;
-    }
-    else if(strcasecmp(result, "battery") == 0) {
-        read_sys(name, "present", result, sizeof(result));
-        m_present = to_int(result);
+    char result[256];
+    int status = read_sys(m_name, "type", result, sizeof(result));
+    if(status > 0) {
+        if(strcasecmp(result, "mains") == 0) {
+            m_present = false;
+        }
+        else if(strcasecmp(result, "battery") == 0) {
+            status = read_sys(m_name, "present", result, sizeof(result));
+            if(status > 0) {
+                m_present = to_int(result) ? true : false;
+            }
+            else {
+                m_present = false;
+            }
+        }
+        else {
+            fprintf(stderr, "Invalid type '%s'\n", result);
+            m_present = false;
+        }
     }
     else {
-        fprintf(stderr, "Invalid type '%s'\n", result);
         m_present = false;
     }
-    if(!is_present()) {
-        return;
-    }
+}
 
+/**
+ * Convert text charging state value into two bool values
+ */
+void BatteryInfo::read_charging_state()
+{
+    char result[256];
 
-    read_sys(name, "status", result, sizeof(result));
-    get_charging_state(result, &m_charging, &m_discharging);
-
-    read_sys(name, "voltage_now", result, sizeof(result));
-    m_volts = uvolts2volts(to_int(result));
-    {
-        read_sys(name, "voltage_min_design", result, sizeof(result));
-        float min_voltage = uvolts2volts(to_int(result));
-        if(min_voltage > 100) {
-            /* Some times volts are in pico-volts, err.. */
-            min_voltage /= 1000;
+    const int status = read_sys(m_name, "status", result, sizeof(result));
+    if(status > 0) {
+        if(strcmp(result, "Charging") == 0) {
+            m_charging = true;
+            m_discharging = false;
         }
-        if(m_volts < 0.5 * min_voltage) {
-            printf("voltage reading is probably broken\n");
-            m_volts = min_voltage;
+        else if(strcmp(result, "Discharging") == 0) {
+            m_discharging = true;
+            m_charging = false;
+        }
+        else if( (strcmp(result, "Unknown") != 0)
+                && (strcmp(result, "Full") != 0)) {
+            fprintf(stderr, "State = '%s'", result);
+            exit(EXIT_FAILURE);
+        }
+        else {
+            m_charging= false;
+            m_discharging = false;
         }
     }
+}
 
-    int status = read_sys(name, "energy_full", result, sizeof(result));
+
+
+void BatteryInfo::read_voltage()
+{
+    char result[256];
+    int status = read_sys(m_name, "voltage_now", result, sizeof(result));
+    if(status > 0) {
+        m_volts = uvolts2volts(to_int(result));
+
+        status = read_sys(m_name, "voltage_min_design", result,
+                sizeof(result));
+        if(status > 0) {
+            float min_voltage = uvolts2volts(to_int(result));
+            if(min_voltage > 100) {
+                /* Some times volts are in pico-volts, err.. */
+                min_voltage /= 1000;
+            }
+            if(m_volts < 0.5 * min_voltage) {
+                printf("voltage reading is probably broken\n");
+                m_volts = min_voltage;
+            }
+        }
+    }
+}
+
+void BatteryInfo::read_capacity()
+{
+    char result[256];
+    int status = read_sys(m_name, "energy_full", result, sizeof(result));
     if(status > 0) {
         m_last_full_capacity = uwatthr2joules(to_int(result));
     }
     else {
-        read_sys(name, "charge_full", result, sizeof(result));
-        m_last_full_capacity = uamphr2joules(to_int(result),
-                m_volts);
+        status = read_sys(m_name, "charge_full", result, sizeof(result));
+        if(status > 0) {
+            m_last_full_capacity = uamphr2joules(to_int(result),
+                    m_volts);
+        }
     }
 
-    status = read_sys(name, "energy_full_design", result, sizeof(result));
+    status = read_sys(m_name, "energy_full_design", result, sizeof(result));
     if(status > 0) {
         m_max_capacity = uwatthr2joules(to_int(result));
     }
     else {
-        read_sys(name, "charge_full_design", result, sizeof(result));
-        m_max_capacity = uamphr2joules(to_int(result), m_volts);
+        status = read_sys(m_name, "charge_full_design", result,
+                sizeof(result));
+        if(status > 0) {
+            m_max_capacity = uamphr2joules(to_int(result), m_volts);
+        }
     }
 
-    status = read_sys(name, "energy_now", result, sizeof(result));
-    if(status >0) {
+    status = read_sys(m_name, "energy_now", result, sizeof(result));
+    if(status > 0) {
         m_current_capacity = uwatthr2joules(to_int(result));
     }
     else {
-        read_sys(name, "charge_now", result, sizeof(result));
-        m_current_capacity = uamphr2joules(to_int(result),
-                m_volts);
+        status = read_sys(m_name, "charge_now", result, sizeof(result));
+        if(status > 0) {
+           m_current_capacity = uamphr2joules(to_int(result),
+                    m_volts);
+        }
     }
 
-    read_sys(name, "alarm", result, sizeof(result));
+    read_sys(m_name, "alarm", result, sizeof(result));
     if(status > 0) {
         m_min_capacity = uwatthr2joules(to_int(result));
     }
@@ -308,15 +327,38 @@ void BatteryInfo::check_battery(const char * name)
         m_min_capacity = uamphr2joules(to_int(result),
                 m_volts);
     }
+}
 
-    status = read_sys(name, "power_now", result, sizeof(result));
+void BatteryInfo::read_rate()
+{
+    char result[256];
+    int status = read_sys(m_name, "power_now", result, sizeof(result));
     if(status > 0) {
         m_rate = uwatts2watts(to_int(result));
     }
     else {
-        read_sys(name, "current_now", result, sizeof(result));
+        read_sys(m_name, "current_now", result, sizeof(result));
         m_rate = uwatts2watts(to_int(result) * m_volts);
     }
+}
+
+/**
+ * Fill in the BatterInfo_t structure with information read from the proc
+ * filesystem about battery name
+ *
+ * @param[out] info The Battery status
+ */
+void BatteryInfo::check_battery()
+{
+    read_type();
+    if(!is_present()) {
+        return;
+    }
+
+    read_charging_state();
+    read_voltage();
+    read_capacity();
+    read_rate();
 }
 
 /**
@@ -343,7 +385,7 @@ int BatteryInfo::calc_left(float min) const
                 mean_rate = strtof(buf, 0);
             }
         }
-        return (int)(left / mean_rate / 60.0 + 0.5);
+        return static_cast<int>(left / mean_rate / 60.0 + 0.5);
     }
     return 999;
 }
@@ -359,7 +401,7 @@ int BatteryInfo::calc_left(float min) const
 static int calc_percent(float part, float total)
 {
     if(total > part) {
-        return (int)(part*100/total + 0.5);
+        return static_cast<int>(part*100/total + 0.5);
     }
     return -1;
 }
@@ -368,7 +410,7 @@ static int calc_percent(float part, float total)
 
 int BatteryInfo::calc_fullness(float min) const
 {
-    return calc_percent(m_current_capacity - min, 
+    return calc_percent(m_current_capacity - min,
                         m_last_full_capacity - min);
 }
 
@@ -398,7 +440,7 @@ int BatteryInfo::calc_next_period(float min) const
     if(worst_rate < m_rate) {
         worst_rate = m_rate;
     }
-    return (int)(left / (60.0 * worst_rate) + 0.5);
+    return static_cast<int>(left / (60.0 * worst_rate) + 0.5);
 }
 
 /**
@@ -471,7 +513,8 @@ void signal_sock_listener(const char * sock, int fullness, bool alert)
         char msg[256];
         snprintf(msg, sizeof(msg), "%i %s\n", fullness, alert ? "ALERT" : "");
 
-        const int length = sendto(fd, msg, strlen(msg), 0, &addr, sizeof(addr));
+        const int length = sendto(fd, msg, strlen(msg), 0,
+                reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr));
         if(length < 0) {
             perror("send");
         }
@@ -495,7 +538,7 @@ void signal_sock_listener(const char * sock, int fullness, bool alert)
  *
  * @return The time in mins whn we should check again
  */
-static int check_batteries(int argc, const char * argv[], const char * sig_sock, 
+static int check_batteries(int argc, const char * argv[], const char * sig_sock,
         int low_threshold)
 {
     int left = 9999;
@@ -506,8 +549,8 @@ static int check_batteries(int argc, const char * argv[], const char * sig_sock,
         struct dirent * entry;
         while((entry = readdir(dir))) {
             if(entry->d_name[0] != '.') {
-                BatteryInfo info;
-                info.check_battery(entry->d_name);
+                BatteryInfo info(entry->d_name);
+                info.check_battery();
                 if(info.is_present()) {
                     info.print_self();
                     info.open_database();
@@ -583,7 +626,8 @@ int main(int argc, const char * argv[])
 
 
     while(1) {
-        const int remaining = check_batteries(argc - i, &argv[i], sig_sock, low_threshold);
+        const int remaining = check_batteries(argc - i, &argv[i], sig_sock,
+                low_threshold);
         printf("Remaining %i\n", remaining);
         if( (reminder_period > time_to_respawn)
             || (remaining > time_to_respawn + reminder_period)) {
