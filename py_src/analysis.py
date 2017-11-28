@@ -1,3 +1,9 @@
+##
+# Copyright (c) 2014 Peter Leese
+#
+# Licensed under the GPL License. See LICENSE file in the project root for full license information.  
+##
+
 def analysis_charge(change):
 #    print(change)
     pass
