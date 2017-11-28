@@ -1,3 +1,9 @@
+##
+# Copyright (c) 2014 Peter Leese
+#
+# Licensed under the GPL License. See LICENSE file in the project root for full license information.  
+##
+
 CFLAGS=-Wall -O3 -Wextra
 CXXFLAGS=$(CFLAGS)
 
