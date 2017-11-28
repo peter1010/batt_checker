@@ -1,4 +1,9 @@
+###
+# Copyright (c) 2014 Peter Leese
 #
+# Licensed under the GPL License. See LICENSE file in the project root for full license information.  
+##
+
 # Thanks goes to http://make.paulandlesley.org for the ideas and concepts that
 # I've borrowed in these makefiles
 #

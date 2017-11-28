@@ -1,6 +1,12 @@
 #ifndef _BATTERY_INFO_H_
 #define _BATTERY_INFO_H_
 
+/**
+ * Copyright (c) 2014 Peter Leese
+ *
+ * Licensed under the GPL License. See LICENSE file in the project root for full license information.  
+ */
+
 #include <stdbool.h>
 
 class BatteryInfo
